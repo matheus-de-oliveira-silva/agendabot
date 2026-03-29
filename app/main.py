@@ -11,18 +11,14 @@ Base.metadata.create_all(bind=engine)
 
 
 async def reminder_loop():
-    """Roda os lembretes uma vez por dia às 18h."""
     from .services.reminder import send_daily_reminders
     from datetime import datetime
 
     while True:
         agora = datetime.now()
-
-        # Calcula quantos segundos faltam para as 18h de hoje
         target = agora.replace(hour=18, minute=0, second=0, microsecond=0)
 
         if agora >= target:
-            # Se já passou das 18h, agenda para amanhã
             target = target.replace(day=target.day + 1)
 
         segundos = (target - agora).total_seconds()
@@ -34,7 +30,6 @@ async def reminder_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Inicia o loop de lembretes em background
     task = asyncio.create_task(reminder_loop())
     yield
     task.cancel()
@@ -50,7 +45,7 @@ app = FastAPI(
 app.include_router(webhook.router)
 app.include_router(appointments.router)
 app.include_router(telegram_webhook.router)
-app.include_router(dashboard.router)    
+app.include_router(dashboard.router)
 
 
 @app.get("/")
@@ -65,7 +60,43 @@ def health():
 
 @app.post("/test/reminders")
 async def test_reminders():
-    """Rota para testar lembretes manualmente."""
     from .services.reminder import send_daily_reminders
     await send_daily_reminders()
     return {"status": "ok", "message": "Lembretes enviados!"}
+
+
+@app.post("/setup/tenant")
+def setup_tenant(data: dict):
+    from .database import SessionLocal
+    from .models import Tenant, Service
+
+    db = SessionLocal()
+    try:
+        existing = db.query(Tenant).filter(Tenant.name == data["name"]).first()
+        if existing:
+            return {"tenant_id": existing.id, "message": "já existe"}
+
+        tenant = Tenant(
+            name=data["name"],
+            business_type=data.get("business_type", "petshop"),
+            phone_number_id=data.get("phone_number_id", "TEST123"),
+            wa_access_token=data.get("wa_access_token", "TOKEN_TESTE")
+        )
+        db.add(tenant)
+        db.commit()
+        db.refresh(tenant)
+
+        services = [
+            {"name": "Banho simples", "duration_min": 60, "price": 4000},
+            {"name": "Banho e tosa", "duration_min": 90, "price": 7000},
+            {"name": "Tosa higiênica", "duration_min": 45, "price": 3500},
+        ]
+        for s in services:
+            service = Service(tenant_id=tenant.id, **s)
+            db.add(service)
+        db.commit()
+
+        return {"tenant_id": tenant.id, "message": "criado com sucesso"}
+    finally:
+        db.close()
+        
