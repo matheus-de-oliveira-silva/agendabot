@@ -10,8 +10,7 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def chat_with_ai(conversation_history: list, new_message: str) -> dict:
-    
-    # Data atual injetada para a IA não errar datas
+
     hoje = datetime.now()
     data_atual = hoje.strftime("%Y-%m-%d")
     amanha = (hoje + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -38,19 +37,28 @@ FLUXO OBRIGATÓRIO:
 4. Cliente confirmar com sim/pode/ok/isso/confirma → chame create_appointment IMEDIATAMENTE
 5. NUNCA chame check_availability depois que cliente confirmou
 
-REGRAS:
-- Responda SEMPRE em JSON puro, sem texto fora do JSON
-- Quando cliente confirmar: use create_appointment, nunca check_availability
-- Fale APENAS sobre serviços do petshop
+AÇÕES DISPONÍVEIS — responda SEMPRE em JSON puro:
 
-JSON para verificar horários:
-{{"action": "check_availability", "date": "{amanha}", "service": "banho_tosa"}}
+Verificar horários:
+{{"action": "check_availability", "date": "2026-03-30", "service": "banho_tosa"}}
 
-JSON para CRIAR agendamento (após confirmação do cliente):
-{{"action": "create_appointment", "customer_name": "João", "pet_name": "Rex", "service": "banho_tosa", "datetime": "{amanha}T15:00:00"}}
+Criar agendamento (após confirmação):
+{{"action": "create_appointment", "customer_name": "João", "pet_name": "Rex", "service": "banho_tosa", "datetime": "2026-03-30T15:00:00"}}
 
-JSON para conversa normal:
+Ver agendamentos do cliente:
+{{"action": "list_appointments"}}
+
+Cancelar agendamento:
+{{"action": "cancel_appointment", "appointment_index": 1}}
+
+Conversa normal:
 {{"action": "reply", "message": "sua mensagem aqui"}}
+
+REGRAS:
+- JSON puro sempre, sem texto fora
+- Quando cliente confirmar: use create_appointment
+- Para cancelar: primeiro liste com list_appointments, depois cancele
+- Fale APENAS sobre serviços do petshop
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -82,10 +90,9 @@ JSON para conversa normal:
 def test_ai():
     print("Testando conexão com OpenAI...")
     history = []
-    resposta1 = chat_with_ai(history, "Oi, quero agendar um banho pro meu cachorro")
-    print(f"Bot: {resposta1}")
+    resposta = chat_with_ai(history, "Oi, quero agendar um banho pro meu cachorro")
+    print(f"Bot: {resposta}")
 
 
 if __name__ == "__main__":
     test_ai()
-    

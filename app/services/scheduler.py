@@ -12,18 +12,18 @@ def check_business_hours(date_str: str) -> dict:
     try:
         date = datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
-        return {"open": False, "message": "Data inválida."}
+        return {"open": False, "reason": "INVALIDA"}
 
     if date.weekday() == 6:
-        return {"open": False, "message": "DOMINGO"}
+        return {"open": False, "reason": "DOMINGO"}
 
     if date_str in FERIADOS:
-        return {"open": False, "message": "FERIADO"}
+        return {"open": False, "reason": "FERIADO"}
 
     if date.date() < datetime.now().date():
-        return {"open": False, "message": "PASSADO"}
+        return {"open": False, "reason": "PASSADO"}
 
-    return {"open": True, "message": ""}
+    return {"open": True, "reason": ""}
 
 
 def get_available_slots(db: Session, tenant_id: str, date_str: str, service_name: str) -> list:
@@ -65,12 +65,23 @@ def format_slots_for_ai(slots: list, date_str: str = "") -> str:
     if date_str:
         try:
             date = datetime.strptime(date_str, "%Y-%m-%d")
+            dia_semana = ["segunda-feira","terça-feira","quarta-feira",
+                          "quinta-feira","sexta-feira","sábado","domingo"][date.weekday()]
+            data_formatada = date.strftime("%d/%m")
 
             if date.weekday() == 6:
-                return "Hoje é domingo e estamos fechados! 😊 De segunda a sábado funcionamos das 9h às 18h. Posso agendar para amanhã?"
+                return (
+                    f"😔 Que pena! Hoje é domingo e estamos fechadinhos!\n\n"
+                    f"Funcionamos de segunda a sábado das 9h às 18h.\n"
+                    f"Posso verificar horários para amanhã, segunda-feira? 😊"
+                )
 
             if date_str in FERIADOS:
-                return "Nesse dia é feriado e estaremos fechados! 🎉 Funcionamos de segunda a sábado das 9h às 18h. Posso agendar para outro dia?"
+                return (
+                    f"🎉 Nesse dia é feriado e vamos estar de folga!\n\n"
+                    f"Funcionamos de segunda a sábado das 9h às 18h.\n"
+                    f"Posso verificar outro dia para você? 😊"
+                )
 
             if date.date() < datetime.now().date():
                 return "Essa data já passou! Vamos escolher uma data futura? 😊"
@@ -80,18 +91,16 @@ def format_slots_for_ai(slots: list, date_str: str = "") -> str:
 
     if not slots:
         return (
-            "Não há horários disponíveis para esse dia. "
-            "Posso verificar outro dia? "
-            "Funcionamos de segunda a sábado das 9h às 18h! 🐾"
+            "😕 Não há horários disponíveis para esse dia.\n\n"
+            "Posso verificar outro dia? Funcionamos de segunda a sábado das 9h às 18h! 🐾"
         )
 
-    times = [s["time"] for s in slots]
+    # Horários um embaixo do outro — muito mais bonito!
+    header = f"📅 Horários disponíveis:\n\n"
+    lista = "\n".join([f"🕐 {s['time']}" for s in slots])
+    footer = "\n\nQual horário prefere? 😊"
 
-    if len(times) == 1:
-        return f"Temos apenas o horário das {times[0]} disponível. Deseja confirmar?"
-
-    times_str = ", ".join(times[:-1]) + f" ou {times[-1]}"
-    return f"Temos os seguintes horários disponíveis: {times_str}. Qual prefere? 😊"
+    return header + lista + footer
 
 
 def get_next_business_day() -> str:
@@ -135,3 +144,42 @@ def create_appointment(db: Session, tenant_id: str, customer_id: str,
         "appointment_id": appointment.id,
         "scheduled_at": scheduled_at.strftime("%d/%m/%Y às %H:%M")
     }
+
+
+def cancel_appointment(db: Session, appointment_id: str, tenant_id: str) -> dict:
+    appointment = db.query(Appointment).filter(
+        Appointment.id == appointment_id,
+        Appointment.tenant_id == tenant_id
+    ).first()
+
+    if not appointment:
+        return {"success": False, "error": "Agendamento não encontrado"}
+
+    if appointment.status == "cancelled":
+        return {"success": False, "error": "Já cancelado"}
+
+    appointment.status = "cancelled"
+    db.commit()
+
+    return {"success": True, "message": "Agendamento cancelado com sucesso"}
+
+
+def get_customer_appointments(db: Session, tenant_id: str, customer_id: str) -> list:
+    """Retorna agendamentos futuros do cliente."""
+    now = datetime.now()
+    appointments = db.query(Appointment).filter(
+        Appointment.tenant_id == tenant_id,
+        Appointment.customer_id == customer_id,
+        Appointment.scheduled_at >= now,
+        Appointment.status != "cancelled"
+    ).order_by(Appointment.scheduled_at).all()
+
+    return [
+        {
+            "id": a.id,
+            "scheduled_at": a.scheduled_at.strftime("%d/%m/%Y às %H:%M"),
+            "status": a.status,
+            "service_id": a.service_id
+        }
+        for a in appointments
+    ]
