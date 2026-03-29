@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from .database import engine, Base
-from .routers import webhook, appointments, telegram_webhook
+from .routers import webhook, appointments, telegram_webhook, dashboard
 from contextlib import asynccontextmanager
 import asyncio
 
@@ -50,6 +50,7 @@ app = FastAPI(
 app.include_router(webhook.router)
 app.include_router(appointments.router)
 app.include_router(telegram_webhook.router)
+app.include_router(dashboard.router)    
 
 
 @app.get("/")
