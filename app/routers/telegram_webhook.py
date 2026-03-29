@@ -11,12 +11,12 @@ from ..services.scheduler import (
 import os
 import json
 import httpx
+from datetime import datetime
 
 router = APIRouter()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-TEST_TENANT_ID = "83e78685-cf7b-43ce-8ded-bff7d907cfb1"
 
 
 async def send_telegram_message(chat_id: int, text: str):
@@ -47,7 +47,8 @@ async def telegram_webhook(request: Request):
     db = SessionLocal()
 
     try:
-        tenant = db.query(Tenant).filter(Tenant.id == TEST_TENANT_ID).first()
+        # Busca o primeiro tenant ativo (MVP com um único negócio)
+        tenant = db.query(Tenant).first()
         if not tenant:
             await send_telegram_message(chat_id, "Erro: configuração não encontrada.")
             return {"status": "error"}
@@ -98,7 +99,6 @@ async def telegram_webhook(request: Request):
             check = check_business_hours(date_str)
 
             if not check["open"]:
-                from datetime import datetime
                 try:
                     date = datetime.strptime(date_str, "%Y-%m-%d")
                     if date.weekday() == 6:
@@ -200,3 +200,4 @@ async def telegram_webhook(request: Request):
 
     finally:
         db.close()
+        
