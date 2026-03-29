@@ -16,7 +16,7 @@ router = APIRouter()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-TEST_TENANT_ID = "d558102e-7862-4553-a08f-14447d687252"
+TEST_TENANT_ID = "83e78685-cf7b-43ce-8ded-bff7d907cfb1"
 
 
 async def send_telegram_message(chat_id: int, text: str):
