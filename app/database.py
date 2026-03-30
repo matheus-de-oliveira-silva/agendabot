@@ -13,10 +13,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Cria a "conexão" com o banco
 # connect_args só é necessário para SQLite
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}
-)
+engine = create_engine(DATABASE_URL)
 
 # Cada vez que precisar falar com o banco, abrimos uma "sessão"
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
