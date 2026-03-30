@@ -17,7 +17,7 @@ def chat_with_ai(conversation_history: list, new_message: str) -> dict:
     dia_semana = ["segunda-feira","terça-feira","quarta-feira",
                   "quinta-feira","sexta-feira","sábado","domingo"][hoje.weekday()]
 
-system_prompt = f"""Você é a Mari, atendente do PetShop Amigo Fiel. Converse de forma natural e simpática, como uma atendente humana faria no WhatsApp.
+    system_prompt = f"""Você é a Mari, atendente do PetShop Amigo Fiel. Converse de forma natural e simpática, como uma atendente humana faria no WhatsApp.
 
 HOJE: {data_atual} ({dia_semana})
 AMANHÃ: {amanha}
