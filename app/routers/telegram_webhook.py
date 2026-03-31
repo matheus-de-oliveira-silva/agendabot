@@ -18,6 +18,31 @@ router = APIRouter()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
+# Mapeamento de chaves da IA para palavras-chave do banco
+SERVICE_KEYWORDS = {
+    "banho_tosa": ["banho e tosa", "tosa"],
+    "banho_simples": ["banho simples", "banho"],
+    "tosa_higienica": ["tosa higiênica", "tosa higienica", "higiênica"],
+    "consulta": ["consulta", "veterinária", "veterinaria"],
+}
+
+def find_service(db, tenant_id: str, service_key: str):
+    """Busca o serviço correto no banco baseado na chave retornada pela IA."""
+    keywords = SERVICE_KEYWORDS.get(service_key, [])
+    for keyword in keywords:
+        service = db.query(Service).filter(
+            Service.tenant_id == tenant_id,
+            Service.active == True,
+            Service.name.ilike(f"%{keyword}%")
+        ).first()
+        if service:
+            return service
+    # Fallback: primeiro serviço ativo
+    return db.query(Service).filter(
+        Service.tenant_id == tenant_id,
+        Service.active == True
+    ).first()
+
 
 async def send_telegram_message(chat_id: int, text: str):
     async with httpx.AsyncClient() as client:
@@ -47,13 +72,11 @@ async def telegram_webhook(request: Request):
     db = SessionLocal()
 
     try:
-        # Busca o primeiro tenant ativo (MVP com um único negócio)
         tenant = db.query(Tenant).first()
         if not tenant:
             await send_telegram_message(chat_id, "Erro: configuração não encontrada.")
             return {"status": "error"}
 
-        # Busca ou cria cliente
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
             Customer.phone == customer_phone
@@ -70,7 +93,6 @@ async def telegram_webhook(request: Request):
             db.commit()
             db.refresh(customer)
 
-        # Busca ou cria conversa
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id == tenant.id,
             Conversation.customer_phone == customer_phone
@@ -88,7 +110,6 @@ async def telegram_webhook(request: Request):
 
         history = json.loads(conversation.messages)
 
-        # Chama a IA
         ai_response = chat_with_ai(history, message_text)
         action = ai_response.get("action", "reply")
         reply_text = ""
@@ -103,7 +124,7 @@ async def telegram_webhook(request: Request):
                     date = datetime.strptime(date_str, "%Y-%m-%d")
                     if date.weekday() == 6:
                         reply_text = (
-                            "😔 Que pena! Hoje é domingo e estamos fechadinhos!\n\n"
+                            "😔 Domingo estamos fechados!\n\n"
                             "Funcionamos de segunda a sábado das 9h às 18h.\n"
                             "Posso verificar horários para amanhã? 😊"
                         )
@@ -129,32 +150,33 @@ async def telegram_webhook(request: Request):
 
         # ── Criar agendamento ──────────────────────────────────
         elif action == "create_appointment":
-            service = db.query(Service).filter(
-                Service.tenant_id == tenant.id,
-                Service.active == True
-            ).first()
+            service_key = ai_response.get("service", "")
+            service = find_service(db, tenant.id, service_key)
 
-            service_id = service.id if service else "default"
-            datetime_str = ai_response.get("datetime", "")
-            pet_name = ai_response.get("pet_name", "seu pet")
-
-            result = create_appointment(
-                db, tenant.id, customer.id,
-                service_id, datetime_str
-            )
-
-            if result["success"]:
-                reply_text = (
-                    f"✅ Agendamento confirmado!\n\n"
-                    f"🐾 Pet: {pet_name}\n"
-                    f"📅 Data: {result['scheduled_at']}\n\n"
-                    f"Até lá! Qualquer dúvida é só chamar. 😊"
-                )
+            if not service:
+                reply_text = "Desculpe, não encontrei esse serviço. Pode escolher outro?"
             else:
-                reply_text = (
-                    f"😕 Não consegui confirmar esse horário ({result['error']}). "
-                    f"Vamos tentar outro horário?"
+                datetime_str = ai_response.get("datetime", "")
+                pet_name = ai_response.get("pet_name", "seu pet")
+
+                result = create_appointment(
+                    db, tenant.id, customer.id,
+                    service.id, datetime_str
                 )
+
+                if result["success"]:
+                    reply_text = (
+                        f"✅ Agendamento confirmado!\n\n"
+                        f"🐾 Pet: {pet_name}\n"
+                        f"✂️ Serviço: {service.name}\n"
+                        f"📅 Data: {result['scheduled_at']}\n\n"
+                        f"Até lá! Qualquer dúvida é só chamar. 😊"
+                    )
+                else:
+                    reply_text = (
+                        f"😕 Não consegui confirmar esse horário ({result['error']}). "
+                        f"Vamos tentar outro horário?"
+                    )
 
         # ── Ver agendamentos do cliente ────────────────────────
         elif action == "list_appointments":
