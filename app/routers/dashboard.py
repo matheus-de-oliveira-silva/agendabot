@@ -8,13 +8,13 @@ import json
 
 router = APIRouter()
 
-TEST_TENANT_ID = "d558102e-7862-4553-a08f-14447d687252"
-
-
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(db: Session = Depends(get_db)):
-    tenant = db.query(Tenant).filter(Tenant.id == TEST_TENANT_ID).first()
-    tenant_name = tenant.name if tenant else "PetShop"
+    tenant = db.query(Tenant).first()
+    if not tenant:
+        return HTMLResponse("<h2>Nenhum tenant configurado ainda.</h2>")
+    tenant_name = tenant.name
+    TEST_TENANT_ID = tenant.id
 
     hoje = datetime.now()
     inicio_hoje = hoje.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -237,3 +237,13 @@ def dashboard(db: Session = Depends(get_db)):
 </html>
 """
     return HTMLResponse(content=html)
+
+@router.get("/debug/tenants")
+def debug_tenants(db: Session = Depends(get_db)):
+    from ..models import Tenant, Appointment
+    tenants = db.query(Tenant).all()
+    result = []
+    for t in tenants:
+        count = db.query(Appointment).filter(Appointment.tenant_id == t.id).count()
+        result.append({"id": t.id, "name": t.name, "appointments": count})
+    return result
