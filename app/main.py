@@ -1,15 +1,12 @@
 from fastapi import FastAPI
 from dotenv import load_dotenv
-from .database import engine, Base
-from .routers import webhook, appointments, telegram_webhook, dashboard
 from contextlib import asynccontextmanager
-from .routers import whatsapp_webhook
-
-app.include_router(whatsapp_webhook.router)
-
 import asyncio
 
 load_dotenv()
+
+from .database import engine, Base
+from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook
 
 Base.metadata.create_all(bind=engine)
 
@@ -50,6 +47,7 @@ app.include_router(webhook.router)
 app.include_router(appointments.router)
 app.include_router(telegram_webhook.router)
 app.include_router(dashboard.router)
+app.include_router(whatsapp_webhook.router)
 
 
 @app.get("/")
@@ -103,4 +101,3 @@ def setup_tenant(data: dict):
         return {"tenant_id": tenant.id, "message": "criado com sucesso"}
     finally:
         db.close()
-        
