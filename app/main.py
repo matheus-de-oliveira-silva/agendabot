@@ -101,3 +101,30 @@ def setup_tenant(data: dict):
         return {"tenant_id": tenant.id, "message": "criado com sucesso"}
     finally:
         db.close()
+@app.post("/admin/migrate")
+def migrate(db_session = None):
+    from .database import engine
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text("""
+            ALTER TABLE appointments 
+            ADD COLUMN IF NOT EXISTS pet_id VARCHAR,
+            ADD COLUMN IF NOT EXISTS pet_name VARCHAR,
+            ADD COLUMN IF NOT EXISTS pet_breed VARCHAR,
+            ADD COLUMN IF NOT EXISTS pet_weight FLOAT,
+            ADD COLUMN IF NOT EXISTS pickup_time VARCHAR;
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pets (
+                id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR NOT NULL,
+                customer_id VARCHAR NOT NULL,
+                name VARCHAR NOT NULL,
+                breed VARCHAR,
+                weight FLOAT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+        """))
+        conn.commit()
+    return {"success": True, "message": "Migration concluída!"}
