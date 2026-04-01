@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
-from ..models import Tenant, Customer, Conversation, Appointment, Service
+from ..models import Tenant, Customer, Conversation, Service
 from ..services.ai_service import chat_with_ai
 from ..services.scheduler import (
     get_available_slots, format_slots_for_ai,
@@ -18,7 +18,6 @@ router = APIRouter()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-# Mapeamento de chaves da IA para palavras-chave do banco
 SERVICE_KEYWORDS = {
     "banho_tosa": ["banho e tosa", "tosa"],
     "banho_simples": ["banho simples", "banho"],
@@ -27,7 +26,6 @@ SERVICE_KEYWORDS = {
 }
 
 def find_service(db, tenant_id: str, service_key: str):
-    """Busca o serviço correto no banco baseado na chave retornada pela IA."""
     keywords = SERVICE_KEYWORDS.get(service_key, [])
     for keyword in keywords:
         service = db.query(Service).filter(
@@ -37,7 +35,6 @@ def find_service(db, tenant_id: str, service_key: str):
         ).first()
         if service:
             return service
-    # Fallback: primeiro serviço ativo
     return db.query(Service).filter(
         Service.tenant_id == tenant_id,
         Service.active == True
@@ -60,7 +57,6 @@ async def telegram_webhook(request: Request):
         return {"status": "ignored"}
 
     message = body["message"]
-
     if "text" not in message:
         return {"status": "ignored"}
 
@@ -109,31 +105,20 @@ async def telegram_webhook(request: Request):
             db.refresh(conversation)
 
         history = json.loads(conversation.messages)
-
         ai_response = chat_with_ai(history, message_text)
         action = ai_response.get("action", "reply")
         reply_text = ""
 
-        # ── Verificar disponibilidade ──────────────────────────
         if action == "check_availability":
             date_str = ai_response.get("date", "")
             check = check_business_hours(date_str)
-
             if not check["open"]:
                 try:
                     date = datetime.strptime(date_str, "%Y-%m-%d")
                     if date.weekday() == 6:
-                        reply_text = (
-                            "😔 Domingo estamos fechados!\n\n"
-                            "Funcionamos de segunda a sábado das 9h às 18h.\n"
-                            "Posso verificar horários para amanhã? 😊"
-                        )
+                        reply_text = "😔 Domingo estamos fechados!\n\nFuncionamos de segunda a sábado das 9h às 18h.\nPosso verificar horários para amanhã? 😊"
                     elif date_str in FERIADOS:
-                        reply_text = (
-                            "🎉 Nesse dia é feriado e vamos estar de folga!\n\n"
-                            "Funcionamos de segunda a sábado das 9h às 18h.\n"
-                            "Posso verificar outro dia para você? 😊"
-                        )
+                        reply_text = "🎉 Nesse dia é feriado e vamos estar de folga!\n\nFuncionamos de segunda a sábado das 9h às 18h.\nPosso verificar outro dia? 😊"
                     elif date.date() < datetime.now().date():
                         reply_text = "Essa data já passou! Vamos escolher uma data futura? 😊"
                     else:
@@ -141,14 +126,9 @@ async def telegram_webhook(request: Request):
                 except ValueError:
                     reply_text = "Não entendi a data. Pode me informar novamente? 😊"
             else:
-                slots = get_available_slots(
-                    db, tenant.id,
-                    date_str,
-                    ai_response.get("service", "")
-                )
+                slots = get_available_slots(db, tenant.id, date_str, ai_response.get("service", ""))
                 reply_text = format_slots_for_ai(slots, date_str)
 
-        # ── Criar agendamento ──────────────────────────────────
         elif action == "create_appointment":
             service_key = ai_response.get("service", "")
             service = find_service(db, tenant.id, service_key)
@@ -156,45 +136,50 @@ async def telegram_webhook(request: Request):
             if not service:
                 reply_text = "Desculpe, não encontrei esse serviço. Pode escolher outro?"
             else:
-                datetime_str = ai_response.get("datetime", "")
-                pet_name = ai_response.get("pet_name", "seu pet")
-
                 result = create_appointment(
-                    db, tenant.id, customer.id,
-                    service.id, datetime_str
+                    db=db,
+                    tenant_id=tenant.id,
+                    customer_id=customer.id,
+                    service_id=service.id,
+                    datetime_str=ai_response.get("datetime", ""),
+                    pet_name=ai_response.get("pet_name"),
+                    pet_breed=ai_response.get("pet_breed"),
+                    pet_weight=ai_response.get("pet_weight"),
+                    pickup_time=ai_response.get("pickup_time"),
                 )
 
                 if result["success"]:
+                    pet_info = ai_response.get("pet_name", "seu pet")
+                    if ai_response.get("pet_breed"):
+                        pet_info += f" ({ai_response['pet_breed']})"
+                    pickup = f"\n🏠 Busca: {ai_response['pickup_time']}" if ai_response.get("pickup_time") else ""
                     reply_text = (
                         f"✅ Agendamento confirmado!\n\n"
-                        f"🐾 Pet: {pet_name}\n"
+                        f"🐾 Pet: {pet_info}\n"
                         f"✂️ Serviço: {service.name}\n"
-                        f"📅 Data: {result['scheduled_at']}\n\n"
+                        f"📅 Data: {result['scheduled_at']}"
+                        f"{pickup}\n\n"
                         f"Até lá! Qualquer dúvida é só chamar. 😊"
                     )
                 else:
-                    reply_text = (
-                        f"😕 Não consegui confirmar esse horário ({result['error']}). "
-                        f"Vamos tentar outro horário?"
-                    )
+                    reply_text = f"😕 Não consegui confirmar esse horário ({result['error']}). Vamos tentar outro?"
 
-        # ── Ver agendamentos do cliente ────────────────────────
         elif action == "list_appointments":
             appointments = get_customer_appointments(db, tenant.id, customer.id)
-
             if not appointments:
-                reply_text = "Você não tem agendamentos futuros no momento. Deseja agendar? 😊"
+                reply_text = "Você não tem agendamentos futuros. Deseja agendar? 😊"
             else:
                 reply_text = "📋 Seus próximos agendamentos:\n\n"
                 for i, a in enumerate(appointments, 1):
-                    reply_text += f"{i}. 📅 {a['scheduled_at']}\n"
+                    reply_text += f"{i}. 📅 {a['scheduled_at']}"
+                    if a.get("pet_name"):
+                        reply_text += f" — {a['pet_name']}"
+                    reply_text += "\n"
                 reply_text += "\nPara cancelar, me diga o número do agendamento."
 
-        # ── Cancelar agendamento ───────────────────────────────
         elif action == "cancel_appointment":
             appointment_index = ai_response.get("appointment_index", 1) - 1
             appointments = get_customer_appointments(db, tenant.id, customer.id)
-
             if not appointments:
                 reply_text = "Você não tem agendamentos para cancelar."
             elif appointment_index < 0 or appointment_index >= len(appointments):
@@ -207,11 +192,9 @@ async def telegram_webhook(request: Request):
                 else:
                     reply_text = f"Não consegui cancelar: {result['error']}"
 
-        # ── Resposta normal ────────────────────────────────────
         else:
             reply_text = ai_response.get("message", "Desculpe, não entendi. Pode repetir?")
 
-        # Atualiza histórico
         history.append({"role": "user", "content": message_text})
         history.append({"role": "assistant", "content": reply_text})
         conversation.messages = json.dumps(history[-20:])
