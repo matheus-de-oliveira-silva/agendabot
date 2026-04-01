@@ -4,7 +4,8 @@ from .database import engine, Base
 from .routers import webhook, appointments, telegram_webhook, dashboard
 from contextlib import asynccontextmanager
 import asyncio
-
+from .routers import whatsapp_webhook
+app.include_router(whatsapp_webhook.router)
 load_dotenv()
 
 Base.metadata.create_all(bind=engine)
