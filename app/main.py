@@ -128,3 +128,17 @@ def migrate(db_session = None):
         """))
         conn.commit()
     return {"success": True, "message": "Migration concluída!"}
+@app.post("/admin/rename-tenant")
+def rename_tenant(data: dict):
+    from .database import SessionLocal
+    from .models import Tenant
+    db = SessionLocal()
+    try:
+        tenant = db.query(Tenant).first()
+        if not tenant:
+            return {"error": "Tenant não encontrado"}
+        tenant.name = data["name"]
+        db.commit()
+        return {"success": True, "name": tenant.name}
+    finally:
+        db.close()
