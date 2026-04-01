@@ -4,6 +4,7 @@ from .database import engine, Base
 from .routers import webhook, appointments, telegram_webhook, dashboard
 from contextlib import asynccontextmanager
 from .routers import whatsapp_webhook
+
 app.include_router(whatsapp_webhook.router)
 
 import asyncio
