@@ -161,10 +161,11 @@ def dashboard(db: Session = Depends(get_db)):
         Appointment.status != "cancelled"
     ).order_by(Appointment.scheduled_at).all()
 
+    amanha_inicio = (hoje + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     proximos = db.query(Appointment).filter(
         Appointment.tenant_id == tid,
-        Appointment.scheduled_at >= hoje,
-        Appointment.scheduled_at <= hoje + timedelta(days=7),
+        Appointment.scheduled_at >= amanha_inicio,
+        Appointment.scheduled_at <= amanha_inicio + timedelta(days=7),
         Appointment.status != "cancelled"
     ).order_by(Appointment.scheduled_at).all()
 
