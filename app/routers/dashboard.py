@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Appointment, Customer, Conversation, Service, Tenant
 from datetime import datetime, timedelta
-import pytz
-import json
+from typing import Optional
+import pytz, json, bcrypt, secrets
 
 router = APIRouter()
 
@@ -29,6 +29,81 @@ SERVICES_MAP = {
     "consulta": "Consulta Veterinária",
 }
 
+
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+def get_tenant_from_request(request: Request, db: Session) -> Optional[object]:
+    """Retorna tenant autenticado via cookie de sessão, ou None."""
+    session_cookie = request.cookies.get("dash_session")
+    if not session_cookie or ":" not in session_cookie:
+        return None
+    tid, token = session_cookie.split(":", 1)
+    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not tenant or tenant.dashboard_token != token:
+        return None
+    return tenant
+
+def login_page_html(tid: str, error: str = "") -> str:
+    err = f'<div class="login-error">{error}</div>' if error else ""
+    return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Entrar no Painel</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'DM Sans',sans-serif;background:#0f1117;color:#e8eaf2;min-height:100vh;display:flex;align-items:center;justify-content:center}}
+.box{{width:360px;padding:36px;background:#1a1d27;border:1px solid #2d3148;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}}
+.logo{{text-align:center;font-size:28px;margin-bottom:6px}}
+.title{{text-align:center;font-size:20px;font-weight:800;color:#7c7de8;margin-bottom:4px}}
+.sub{{text-align:center;font-size:13px;color:#9aa0b8;margin-bottom:24px}}
+label{{display:block;font-size:11px;font-weight:600;color:#9aa0b8;margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}}
+input{{width:100%;padding:11px 14px;border:1px solid #2d3148;border-radius:10px;background:#0f1117;color:#e8eaf2;font-size:14px;font-family:'DM Sans',sans-serif;outline:none}}
+input:focus{{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}}
+.btn{{width:100%;padding:12px;background:#5B5BD6;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:16px}}
+.btn:hover{{background:#7c7de8}}
+.login-error{{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px}}
+</style></head><body>
+<div class="box">
+<div class="logo">🐾</div>
+<div class="title">Painel de Agendamentos</div>
+<div class="sub">Entre com sua senha para continuar</div>
+{err}
+<form method="POST" action="/dashboard/login">
+<input type="hidden" name="tid" value="{tid}">
+<div style="margin-bottom:14px"><label>Senha</label>
+<input type="password" name="password" placeholder="••••••••" autofocus required></div>
+<button type="submit" class="btn">Entrar</button>
+</form>
+</div></body></html>"""
+
+# ── Login / Logout do dashboard ───────────────────────────────────────────────
+@router.get("/dashboard/login", response_class=HTMLResponse)
+def dash_login_page(tid: str = "", request: Request = None):
+    return HTMLResponse(login_page_html(tid))
+
+@router.post("/dashboard/login")
+async def dash_do_login(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    tid = form.get("tid", "")
+    password = form.get("password", "")
+    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not tenant or not tenant.dashboard_password:
+        return HTMLResponse(login_page_html(tid, "Tenant não encontrado ou sem senha configurada."))
+    if not bcrypt.checkpw(password.encode(), tenant.dashboard_password.encode()):
+        return HTMLResponse(login_page_html(tid, "Senha incorreta. Tente novamente."))
+    # Gera/renova token de sessão
+    if not tenant.dashboard_token:
+        tenant.dashboard_token = secrets.token_urlsafe(32)
+        db.commit()
+    resp = RedirectResponse(f"/dashboard?tid={tid}", status_code=302)
+    resp.set_cookie("dash_session", f"{tid}:{tenant.dashboard_token}", httponly=True, max_age=86400*30)
+    return resp
+
+@router.get("/dashboard/logout")
+def dash_logout(tid: str = ""):
+    resp = RedirectResponse(f"/dashboard/login?tid={tid}", status_code=302)
+    resp.delete_cookie("dash_session")
+    return resp
+
+
 # ── API para atualizar status ─────────────────────────────────────────────────
 @router.post("/api/appointment/{appointment_id}/status")
 def update_status(appointment_id: str, request_data: dict, db: Session = Depends(get_db)):
@@ -49,12 +124,16 @@ def cancel_appt(appointment_id: str, db: Session = Depends(get_db)):
     return {"success": True}
 
 @router.post("/api/appointment/create")
-def create_appt(request_data: dict, db: Session = Depends(get_db)):
+def create_appt(request_data: dict, request: Request, db: Session = Depends(get_db)):
     """Cria agendamento manual pelo dashboard"""
     try:
-        tenant = db.query(Tenant).first()
+        tenant = get_tenant_from_request(request, db)
         if not tenant:
-            return JSONResponse({"error": "Tenant não encontrado"}, status_code=404)
+            # fallback: aceita tid no body para chamadas da API
+            tid = request_data.get("tenant_id", "")
+            tenant = db.query(Tenant).filter(Tenant.id == tid).first() if tid else None
+        if not tenant:
+            return JSONResponse({"error": "Não autenticado"}, status_code=401)
 
         customer_name = request_data.get("customer_name", "").strip()
         pet_name = request_data.get("pet_name", "").strip()
@@ -121,11 +200,13 @@ def create_appt(request_data: dict, db: Session = Depends(get_db)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/availability")
-def check_avail(date: str, db: Session = Depends(get_db)):
+def check_avail(date: str, request: Request, tid: str = "", db: Session = Depends(get_db)):
     """Retorna horários ocupados para uma data"""
-    tenant = db.query(Tenant).first()
+    tenant = get_tenant_from_request(request, db)
+    if not tenant and tid:
+        tenant = db.query(Tenant).filter(Tenant.id == tid).first()
     if not tenant:
-        return {"slots": []}
+        return {"busy": []}
     try:
         day = datetime.strptime(date, "%Y-%m-%d")
         start = day.replace(hour=0, minute=0, second=0)
@@ -143,13 +224,16 @@ def check_avail(date: str, db: Session = Depends(get_db)):
 
 # ── Dashboard principal ───────────────────────────────────────────────────────
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(db: Session = Depends(get_db)):
-    tenant = db.query(Tenant).first()
+def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
+    tenant = get_tenant_from_request(request, db)
+    # Se não autenticado mas tem tid, redireciona para login
     if not tenant:
-        return HTMLResponse("<h2>Nenhum tenant configurado ainda.</h2>")
+        if tid:
+            return RedirectResponse(f"/dashboard/login?tid={tid}", status_code=302)
+        return HTMLResponse("<h2>Acesso negado. Use o link fornecido pelo administrador.</h2>", status_code=401)
 
-    tenant_name = tenant.name
     tid = tenant.id
+    tenant_name = tenant.display_name or tenant.name
     hoje = agora_brasilia()
     inicio_hoje = hoje.replace(hour=0, minute=0, second=0, microsecond=0)
     fim_hoje = hoje.replace(hour=23, minute=59, second=59, microsecond=0)
@@ -672,6 +756,7 @@ def dashboard(db: Session = Depends(get_db)):
         </button>
         <button class="btn-icon" onclick="toggleTheme()" id="theme-btn" title="Modo noturno">🌙</button>
         <button class="btn-icon" onclick="location.reload()" title="Atualizar">↻</button>
+        <a href="/dashboard/logout" class="btn-icon" title="Sair" style="text-decoration:none">🚪</a>
     </div>
 </div>
 
@@ -808,6 +893,7 @@ def dashboard(db: Session = Depends(get_db)):
 <div class="toast" id="toast"></div>
 
 <script>
+    const TENANT_ID = '{tid}';
     // ── Tema ──────────────────────────────────────────────────────────────────
     const savedTheme = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
@@ -899,7 +985,7 @@ def dashboard(db: Session = Depends(get_db)):
 
         let busy = [];
         try {{
-            const res = await fetch(`/api/availability?date=${{date}}`);
+            const res = await fetch(`/api/availability?date=${{date}}&tid=${{TENANT_ID}}`);
             const data = await res.json();
             busy = data.busy || [];
         }} catch(e) {{}}

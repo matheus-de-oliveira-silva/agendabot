@@ -8,6 +8,9 @@ load_dotenv()
 from .database import engine, Base
 from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook
 
+from .routers import ..., admin
+app.include_router(admin.router)
+
 Base.metadata.create_all(bind=engine)
 
 
