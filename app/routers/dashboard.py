@@ -978,10 +978,10 @@ def dashboard(db: Session = Depends(get_db)):
     }}
 
     // Auto-refresh a cada 60 segundos — pausa se modal estiver aberto
-    setInterval(() => {
+    setInterval(() => {{
         const modalAberto = document.getElementById('modalOverlay').classList.contains('open');
         if (!modalAberto) location.reload();
-    }, 60000);
+    }}, 60000);
 </script>
 
 </body>
