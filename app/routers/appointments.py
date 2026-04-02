@@ -154,3 +154,57 @@ def list_conversations(tenant_id: str, db: Session = Depends(get_db)):
         }
         for c in conversations
     ]
+class StatusUpdate(BaseModel):
+    status: str
+
+
+class ManualAppointment(BaseModel):
+    customer_name: str
+    pet_name: str
+    datetime: str
+
+
+@router.put("/appointment/{appointment_id}/status")
+def update_status(appointment_id: str, data: StatusUpdate, db: Session = Depends(get_db)):
+
+    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+
+    appointment.status = data.status
+    db.commit()
+
+    return {"message": "status atualizado"}
+
+
+@router.delete("/appointment/{appointment_id}")
+def delete_appointment(appointment_id: str, db: Session = Depends(get_db)):
+
+    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+
+    db.delete(appointment)
+    db.commit()
+
+    return {"message": "agendamento cancelado"}
+
+
+@router.post("/manual-appointment")
+def manual_appointment(data: ManualAppointment, db: Session = Depends(get_db)):
+
+    appointment = Appointment(
+        tenant_id="manual",
+        customer_id="manual",
+        service_id="manual",
+        pet_name=data.pet_name,
+        scheduled_at=data.datetime,
+        status="confirmed"
+    )
+
+    db.add(appointment)
+    db.commit()
+
+    return {"message": "agendamento criado"}

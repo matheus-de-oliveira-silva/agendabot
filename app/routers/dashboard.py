@@ -1,5 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..models import Appointment
 
 router = APIRouter()
 
@@ -7,41 +11,40 @@ router = APIRouter()
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(db: Session = Depends(get_db)):
 
-    appointments = db.query(Appointment).all()
+    appointments = db.query(Appointment).order_by(Appointment.scheduled_at.desc()).all()
 
     agenda_html = ""
 
     for a in appointments:
 
-        customer = a.customer_name if a.customer_name else "Cliente"
         pet = a.pet_name if a.pet_name else "Pet"
-        date = str(a.datetime) if a.datetime else "Sem data"
-        status = a.status if a.status else "Confirmado"
+        date = str(a.scheduled_at) if a.scheduled_at else "Sem data"
+        status = a.status if a.status else "confirmado"
 
         agenda_html += f"""
         <div class="agenda-item">
+
             <div>
                 <strong>{date}</strong><br>
-                {customer} - {pet}
+                Pet: {pet}
             </div>
 
             <div>
 
                 <span class="status">{status}</span>
 
-                <select onchange="updateStatus({a.id},this.value)">
-                    <option value="Confirmado">Confirmado</option>
-                    <option value="Em atendimento">Em atendimento</option>
-                    <option value="Finalizado">Finalizado</option>
+                <select onchange="updateStatus('{a.id}',this.value)">
+                    <option value="confirmed">Confirmado</option>
+                    <option value="in_progress">Em atendimento</option>
+                    <option value="finished">Finalizado</option>
                 </select>
 
-                <button onclick="cancelAppointment({a.id})">X</button>
+                <button onclick="cancelAppointment('{a.id}')">X</button>
 
             </div>
+
         </div>
         """
-
-    total_clientes = len(set([a.customer_name for a in appointments if a.customer_name]))
 
     return f"""
 <!DOCTYPE html>
@@ -49,7 +52,7 @@ def dashboard(db: Session = Depends(get_db)):
 <head>
 
 <meta charset="UTF-8">
-<title>Dashboard</title>
+<title>Agenda</title>
 
 <style>
 
@@ -80,7 +83,7 @@ padding:20px;
 
 .cards {{
 display:grid;
-grid-template-columns:repeat(4,1fr);
+grid-template-columns:repeat(2,1fr);
 gap:15px;
 margin-bottom:20px;
 }}
@@ -139,7 +142,6 @@ border-radius:5px;
 <h2>Agenda do Petshop</h2>
 
 <div>
-<button onclick="novoAgendamento()">Novo</button>
 <button onclick="toggleDark()">🌙</button>
 </div>
 
@@ -154,11 +156,6 @@ Agendamentos
 <h2>{len(appointments)}</h2>
 </div>
 
-<div class="card">
-Clientes
-<h2>{total_clientes}</h2>
-</div>
-
 </div>
 
 <h3>Agenda</h3>
@@ -170,9 +167,7 @@ Clientes
 <script>
 
 function toggleDark(){{
-
 document.body.classList.toggle("dark")
-
 }}
 
 async function updateStatus(id,status){{
@@ -190,31 +185,6 @@ async function cancelAppointment(id){{
 if(!confirm("Cancelar agendamento?")) return
 
 await fetch(`/api/appointment/${{id}}`,{{method:"DELETE"}})
-
-location.reload()
-
-}}
-
-async function novoAgendamento(){{
-
-let name = prompt("Nome do cliente")
-let pet = prompt("Nome do pet")
-let date = prompt("Data e hora")
-
-if(!name || !pet || !date) return
-
-await fetch("/api/manual-appointment",{{
-
-method:"POST",
-headers:{{"Content-Type":"application/json"}},
-
-body:JSON.stringify({{
-customer_name:name,
-pet_name:pet,
-datetime:date
-}})
-
-}})
 
 location.reload()
 
