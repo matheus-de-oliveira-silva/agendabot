@@ -1,3 +1,9 @@
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
+
+router = APIRouter()
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(db: Session = Depends(get_db)):
 
