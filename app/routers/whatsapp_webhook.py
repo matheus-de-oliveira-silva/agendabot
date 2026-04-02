@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
-from ..models import Tenant, Customer, Conversation, Service
+from ..models import Tenant, Customer, Conversation, Service, Pet, Appointment
 from ..services.ai_service import chat_with_ai
 from ..services.scheduler import (
     get_available_slots, format_slots_for_ai,
@@ -11,10 +11,12 @@ from ..services.scheduler import (
 import os
 import json
 import httpx
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 
 router = APIRouter()
 
+BRASILIA = pytz.timezone("America/Sao_Paulo")
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "agendabot")
@@ -41,6 +43,38 @@ def find_service(db, tenant_id: str, service_key: str):
         Service.active == True
     ).first()
 
+def get_customer_context(db, tenant_id: str, customer_id: str, customer_name: str) -> dict:
+    """Monta contexto do cliente para a IA: nome, pets e histórico."""
+    pets = db.query(Pet).filter(
+        Pet.tenant_id == tenant_id,
+        Pet.customer_id == customer_id
+    ).all()
+
+    total_appointments = db.query(Appointment).filter(
+        Appointment.tenant_id == tenant_id,
+        Appointment.customer_id == customer_id,
+        Appointment.status != "cancelled"
+    ).count()
+
+    return {
+        "name": customer_name or "",
+        "pets": [
+            {
+                "name": p.name,
+                "breed": p.breed,
+                "weight": p.weight
+            } for p in pets
+        ],
+        "total_appointments": total_appointments
+    }
+
+def should_reset_conversation(conversation) -> bool:
+    """Reseta conversa se última mensagem foi há mais de 24h."""
+    if not conversation.updated_at:
+        return False
+    agora = datetime.now(BRASILIA).replace(tzinfo=None)
+    diff = agora - conversation.updated_at
+    return diff > timedelta(hours=24)
 
 async def send_whatsapp_message(phone: str, text: str):
     url = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
@@ -72,12 +106,13 @@ async def whatsapp_webhook(request: Request):
         message_text = (
             message.get("conversation") or
             message.get("extendedTextMessage", {}).get("text") or ""
-        )
+        ).strip()
 
         if not message_text:
             return {"status": "ignored"}
 
         customer_phone = remote_jid.replace("@s.whatsapp.net", "")
+        push_name = data.get("pushName", "")
 
     except (KeyError, TypeError):
         return {"status": "ignored"}
@@ -95,7 +130,6 @@ async def whatsapp_webhook(request: Request):
         ).first()
 
         if not customer:
-            push_name = data.get("pushName", "")
             customer = Customer(
                 tenant_id=tenant.id,
                 phone=customer_phone,
@@ -105,6 +139,9 @@ async def whatsapp_webhook(request: Request):
             db.add(customer)
             db.commit()
             db.refresh(customer)
+        elif push_name and not customer.name:
+            customer.name = push_name
+            db.commit()
 
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id == tenant.id,
@@ -121,8 +158,14 @@ async def whatsapp_webhook(request: Request):
             db.commit()
             db.refresh(conversation)
 
+        # Reset automático por inatividade (24h) — mantém dados do cliente
+        if should_reset_conversation(conversation):
+            conversation.messages = "[]"
+            db.commit()
+
         history = json.loads(conversation.messages)
-        ai_response = chat_with_ai(history, message_text)
+        customer_context = get_customer_context(db, tenant.id, customer.id, customer.name or push_name)
+        ai_response = chat_with_ai(history, message_text, customer_context)
         action = ai_response.get("action", "reply")
         reply_text = ""
 
@@ -135,7 +178,7 @@ async def whatsapp_webhook(request: Request):
                     if date.weekday() == 6:
                         reply_text = "😔 Domingo estamos fechados!\n\nFuncionamos de segunda a sábado das 9h às 18h.\nPosso verificar horários para amanhã? 😊"
                     elif date_str in FERIADOS:
-                        reply_text = "🎉 Nesse dia é feriado!\n\nFuncionamos de segunda a sábado das 9h às 18h.\nPosso verificar outro dia? 😊"
+                        reply_text = "🎉 Nesse dia é feriado e vamos estar de folga!\n\nFuncionamos de segunda a sábado das 9h às 18h.\nPosso verificar outro dia? 😊"
                     elif date.date() < datetime.now().date():
                         reply_text = "Essa data já passou! Vamos escolher uma data futura? 😊"
                     else:
@@ -222,4 +265,3 @@ async def whatsapp_webhook(request: Request):
 
     finally:
         db.close()
-        

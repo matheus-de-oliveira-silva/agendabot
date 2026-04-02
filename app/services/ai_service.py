@@ -17,7 +17,7 @@ def agora_brasilia() -> datetime:
     return datetime.now(BRASILIA).replace(tzinfo=None)
 
 
-def chat_with_ai(conversation_history: list, new_message: str) -> dict:
+def chat_with_ai(conversation_history: list, new_message: str, customer_context: dict = None) -> dict:
     agora = agora_brasilia()
     data_atual = agora.strftime("%Y-%m-%d")
     hora_atual = agora.strftime("%H:%M")
@@ -25,18 +25,49 @@ def chat_with_ai(conversation_history: list, new_message: str) -> dict:
     dia_semana = ["segunda-feira", "terça-feira", "quarta-feira",
                   "quinta-feira", "sexta-feira", "sábado", "domingo"][agora.weekday()]
 
-    system_prompt = f"""Você é a Mari, atendente virtual do PetShop Amigo Fiel. Converse de forma natural, calorosa e simpática, como uma atendente humana que ama animais faria no WhatsApp. Use linguagem informal mas profissional. Pode mandar mensagens curtas como "Um momentinho! 🐾" antes de buscar informações — isso deixa a conversa mais humanizada.
+    # Monta contexto do cliente para a IA
+    cliente_info = ""
+    if customer_context:
+        nome = customer_context.get("name", "")
+        pets = customer_context.get("pets", [])
+        agendamentos_anteriores = customer_context.get("total_appointments", 0)
+
+        if nome:
+            cliente_info += f"\nNOME DO CLIENTE: {nome}"
+
+        if pets:
+            cliente_info += f"\nPETS CONHECIDOS:"
+            for pet in pets:
+                pet_str = f"\n  - {pet['name']}"
+                if pet.get("breed"):
+                    pet_str += f" ({pet['breed']}"
+                    if pet.get("weight"):
+                        pet_str += f", {pet['weight']}kg"
+                    pet_str += ")"
+                cliente_info += pet_str
+
+        if agendamentos_anteriores > 0:
+            cliente_info += f"\nCLIENTE RECORRENTE: sim ({agendamentos_anteriores} agendamentos anteriores)"
+        else:
+            cliente_info += f"\nCLIENTE RECORRENTE: não (primeira vez)"
+
+    system_prompt = f"""Você é a Mari, atendente virtual do PetShop Amigo Fiel. Converse de forma natural, calorosa e simpática, como uma atendente humana que ama animais faria no WhatsApp. Use linguagem informal mas profissional.
 
 HOJE: {data_atual} ({dia_semana}) — HORA ATUAL: {hora_atual} (horário de Brasília)
 AMANHÃ: {amanha}
+{cliente_info}
 
-⚠️ REGRA CRÍTICA: NUNCA invente horários disponíveis. SEMPRE use check_availability para buscar horários reais do sistema. Nunca diga que um dia é feriado sem ter certeza absoluta.
+⚠️ REGRAS CRÍTICAS:
+- NUNCA invente horários disponíveis. SEMPRE use check_availability para buscar horários reais.
+- NUNCA diga que um dia é feriado sem ter certeza. Verifique a lista abaixo.
+- Se o cliente já tem pets cadastrados, use os dados existentes — não pergunte raça/peso de novo.
+- Se for cliente recorrente, seja mais íntima e chame pelo nome.
 
-FERIADOS NACIONAIS 2026 (APENAS estes dias são feriados):
+FERIADOS NACIONAIS 2026 (APENAS estes são feriados):
 - 01/01 (quinta) → Ano Novo
 - 16/02 (segunda) → Carnaval
 - 17/02 (terça) → Carnaval
-- 03/04 (sexta) → Sexta-feira Santa
+- 03/04 (sexta) → Sexta-feira Santa ← ATENÇÃO: apenas a sexta, não a semana toda
 - 21/04 (terça) → Tiradentes
 - 01/05 (sexta) → Dia do Trabalho
 - 04/06 (quinta) → Corpus Christi
@@ -46,7 +77,7 @@ FERIADOS NACIONAIS 2026 (APENAS estes dias são feriados):
 - 15/11 (domingo) → Proclamação da República
 - 25/12 (sexta) → Natal
 
-⚠️ ATENÇÃO: Segunda-feira 06/04/2026 NÃO é feriado. Antes de dizer que um dia é feriado, verifique com calma se a data está na lista acima. Se não estiver, é dia normal.
+Segunda 06/04, Segunda 13/04 e todos os outros dias que não estão na lista acima são dias NORMAIS de funcionamento.
 
 SERVIÇOS (use exatamente estas chaves no JSON):
 - "banho_simples" → Banho simples: R$ 40, 60 min
@@ -54,7 +85,7 @@ SERVIÇOS (use exatamente estas chaves no JSON):
 - "tosa_higienica" → Tosa higiênica: R$ 35, 45 min
 - "consulta" → Consulta veterinária: R$ 120, 30 min
 
-HORÁRIOS DE FUNCIONAMENTO: Segunda a sábado, 9h às 18h. Domingo sempre fechado.
+HORÁRIOS: Segunda a sábado, 9h às 18h. Domingo sempre fechado.
 
 IDENTIFICAÇÃO DE SERVIÇO:
 - "banho e tosa", "banho com tosa", "tosa completa" → banho_tosa
@@ -63,26 +94,26 @@ IDENTIFICAÇÃO DE SERVIÇO:
 - "consulta", "veterinário", "vet" → consulta
 
 FLUXO DE AGENDAMENTO:
-1. Cliente quer agendar → pergunte nome do pet + serviço + data desejada em UMA mensagem
-2. Com nome + data → check_availability (verifique se a data é dia útil e não é feriado antes!)
-3. Cliente escolhe horário → pergunte raça, peso aproximado e horário de busca em UMA mensagem
-4. Com todas as infos → confirme resumo completo e peça confirmação
+1. Cliente quer agendar → pergunte serviço + data (e nome do pet se não souber)
+2. Com data → check_availability
+3. Cliente escolhe horário → se não souber raça/peso, pergunte. Se já souber, pule.
+4. Confirme resumo completo e peça confirmação
 5. Cliente confirma → create_appointment com todos os dados
 
-INFORMAÇÕES A COLETAR:
-- Nome do pet (obrigatório)
+INFORMAÇÕES A COLETAR (só pergunte o que ainda não sabe):
+- Nome do pet (obrigatório — use o cadastrado se já existir)
 - Serviço desejado (obrigatório)
 - Data e horário (obrigatório)
-- Raça do pet (importante para o serviço)
-- Peso aproximado em kg (importante para precificação)
-- Horário de busca/retirada (importante para organização)
+- Raça do pet (só pergunte se não tiver no cadastro)
+- Peso aproximado em kg (só pergunte se não tiver no cadastro)
+- Horário de busca/retirada (sempre pergunte)
 
 HUMANIZAÇÃO:
-- Elogie o nome do pet ("Que nome lindo! 😍")
-- Demonstre interesse genuíno pelo pet
-- Use emojis com moderação e naturalidade
-- Se for cliente recorrente (tem histórico), seja mais íntima
-- Pode usar "Um momentinho! 🐾" antes de buscar horários — é humanizado e ok
+- Chame o cliente pelo nome se souber
+- Mencione o pet pelo nome se souber
+- Use emojis com moderação
+- Pode dizer "Um momentinho! 🐾" antes de buscar horários
+- Para clientes recorrentes: "Que bom te ver de novo! 😊"
 
 RESUMO FINAL antes de confirmar:
 "Perfeito! Deixa eu confirmar tudo:
@@ -121,7 +152,7 @@ CAMPOS DO JSON:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        temperature=0.7,
+        temperature=0.3,
         max_tokens=600
     )
 
@@ -153,3 +184,4 @@ def test_ai():
 
 if __name__ == "__main__":
     test_ai()
+    

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
-from ..models import Tenant, Customer, Conversation, Service
+from ..models import Tenant, Customer, Conversation, Service, Pet, Appointment
 from ..services.ai_service import chat_with_ai
 from ..services.scheduler import (
     get_available_slots, format_slots_for_ai,
@@ -11,12 +11,15 @@ from ..services.scheduler import (
 import os
 import json
 import httpx
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 
 router = APIRouter()
 
+BRASILIA = pytz.timezone("America/Sao_Paulo")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+COMANDOS_RESET = ["/start", "/reiniciar", "/reset", "/novo"]
 
 SERVICE_KEYWORDS = {
     "banho_tosa": ["banho e tosa", "tosa"],
@@ -40,6 +43,38 @@ def find_service(db, tenant_id: str, service_key: str):
         Service.active == True
     ).first()
 
+def get_customer_context(db, tenant_id: str, customer_id: str, customer_name: str) -> dict:
+    """Monta contexto do cliente para a IA: nome, pets e histórico."""
+    pets = db.query(Pet).filter(
+        Pet.tenant_id == tenant_id,
+        Pet.customer_id == customer_id
+    ).all()
+
+    total_appointments = db.query(Appointment).filter(
+        Appointment.tenant_id == tenant_id,
+        Appointment.customer_id == customer_id,
+        Appointment.status != "cancelled"
+    ).count()
+
+    return {
+        "name": customer_name or "",
+        "pets": [
+            {
+                "name": p.name,
+                "breed": p.breed,
+                "weight": p.weight
+            } for p in pets
+        ],
+        "total_appointments": total_appointments
+    }
+
+def should_reset_conversation(conversation) -> bool:
+    """Reseta conversa se última mensagem foi há mais de 24h."""
+    if not conversation.updated_at:
+        return False
+    agora = datetime.now(BRASILIA).replace(tzinfo=None)
+    diff = agora - conversation.updated_at
+    return diff > timedelta(hours=24)
 
 async def send_telegram_message(chat_id: int, text: str):
     async with httpx.AsyncClient() as client:
@@ -62,7 +97,7 @@ async def telegram_webhook(request: Request):
 
     chat_id = message["chat"]["id"]
     customer_phone = str(chat_id)
-    message_text = message["text"]
+    message_text = message["text"].strip()
     first_name = message["chat"].get("first_name", "")
 
     db = SessionLocal()
@@ -88,6 +123,9 @@ async def telegram_webhook(request: Request):
             db.add(customer)
             db.commit()
             db.refresh(customer)
+        elif first_name and not customer.name:
+            customer.name = first_name
+            db.commit()
 
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id == tenant.id,
@@ -104,8 +142,23 @@ async def telegram_webhook(request: Request):
             db.commit()
             db.refresh(conversation)
 
+        # Reset por comando
+        if message_text.lower() in COMANDOS_RESET:
+            conversation.messages = "[]"
+            db.commit()
+            nome = f" {customer.name or first_name}" if (customer.name or first_name) else ""
+            reply_text = f"Oi{nome}! 😊 Bem-vindo ao PetShop Amigo Fiel!\n\nComo posso ajudar você e seu pet hoje? 🐾"
+            await send_telegram_message(chat_id, reply_text)
+            return {"status": "ok"}
+
+        # Reset automático por inatividade (24h) — mantém dados do cliente
+        if should_reset_conversation(conversation):
+            conversation.messages = "[]"
+            db.commit()
+
         history = json.loads(conversation.messages)
-        ai_response = chat_with_ai(history, message_text)
+        customer_context = get_customer_context(db, tenant.id, customer.id, customer.name or first_name)
+        ai_response = chat_with_ai(history, message_text, customer_context)
         action = ai_response.get("action", "reply")
         reply_text = ""
 
@@ -205,4 +258,3 @@ async def telegram_webhook(request: Request):
 
     finally:
         db.close()
-        
