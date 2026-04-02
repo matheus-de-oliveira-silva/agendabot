@@ -13,173 +13,359 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 BRASILIA = pytz.timezone("America/Sao_Paulo")
 
 
-def agora_brasilia() -> datetime:
+# --------------------------------------------------
+# HORÁRIO ATUAL
+# --------------------------------------------------
+
+def agora_brasilia():
     return datetime.now(BRASILIA).replace(tzinfo=None)
 
 
-def chat_with_ai(conversation_history: list, new_message: str, customer_context: dict = None) -> dict:
+# --------------------------------------------------
+# LIMPEZA DE JSON DA IA
+# --------------------------------------------------
+
+def limpar_json(texto: str):
+
+    texto = re.sub(r"```json", "", texto)
+    texto = re.sub(r"```", "", texto)
+
+    texto = texto.strip()
+
+    match = re.search(r"\{.*\}", texto, re.DOTALL)
+
+    if match:
+        return match.group()
+
+    return texto
+
+
+# --------------------------------------------------
+# VALIDAÇÃO DE RESPOSTA
+# --------------------------------------------------
+
+def validar_resposta(resposta: dict):
+
+    action = resposta.get("action")
+
+    if not action:
+        return {
+            "action": "reply",
+            "message": "Desculpa, pode repetir? 😊"
+        }
+
+    # proteção contra agendamento incompleto
+    if action == "create_appointment":
+
+        campos_obrigatorios = [
+            "customer_name",
+            "pet_name",
+            "service",
+            "datetime"
+        ]
+
+        for campo in campos_obrigatorios:
+
+            if not resposta.get(campo):
+
+                return {
+                    "action": "reply",
+                    "message": "Antes de finalizar o agendamento, preciso de mais algumas informações 😊"
+                }
+
+    return resposta
+
+
+# --------------------------------------------------
+# FUNÇÃO PRINCIPAL
+# --------------------------------------------------
+
+def chat_with_ai(conversation_history, new_message, customer_context=None):
+
     agora = agora_brasilia()
+
     data_atual = agora.strftime("%Y-%m-%d")
     hora_atual = agora.strftime("%H:%M")
     amanha = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-    dia_semana = ["segunda-feira", "terça-feira", "quarta-feira",
-                  "quinta-feira", "sexta-feira", "sábado", "domingo"][agora.weekday()]
 
-    # Monta contexto do cliente para a IA
+    dias = [
+        "segunda-feira",
+        "terça-feira",
+        "quarta-feira",
+        "quinta-feira",
+        "sexta-feira",
+        "sábado",
+        "domingo"
+    ]
+
+    dia_semana = dias[agora.weekday()]
+
+    # --------------------------------------------------
+    # CONTEXTO DO CLIENTE
+    # --------------------------------------------------
+
     cliente_info = ""
+
     if customer_context:
-        nome = customer_context.get("name", "")
+
+        nome = customer_context.get("name")
         pets = customer_context.get("pets", [])
-        agendamentos_anteriores = customer_context.get("total_appointments", 0)
+        total = customer_context.get("total_appointments", 0)
 
         if nome:
-            cliente_info += f"\nNOME DO CLIENTE: {nome}"
+            cliente_info += f"\nCLIENTE: {nome}"
 
         if pets:
-            cliente_info += f"\nPETS CONHECIDOS:"
+
+            cliente_info += "\nPETS CADASTRADOS:"
+
             for pet in pets:
-                pet_str = f"\n  - {pet['name']}"
+
+                linha = f"\n- {pet['name']}"
+
                 if pet.get("breed"):
-                    pet_str += f" ({pet['breed']}"
+                    linha += f" ({pet['breed']}"
+
                     if pet.get("weight"):
-                        pet_str += f", {pet['weight']}kg"
-                    pet_str += ")"
-                cliente_info += pet_str
+                        linha += f", {pet['weight']}kg"
 
-        if agendamentos_anteriores > 0:
-            cliente_info += f"\nCLIENTE RECORRENTE: sim ({agendamentos_anteriores} agendamentos anteriores)"
+                    linha += ")"
+
+                cliente_info += linha
+
+        if total > 0:
+            cliente_info += f"\nCLIENTE RECORRENTE: sim ({total} atendimentos)"
         else:
-            cliente_info += f"\nCLIENTE RECORRENTE: não (primeira vez)"
+            cliente_info += "\nCLIENTE RECORRENTE: não"
 
-    system_prompt = f"""Você é a Mari, atendente virtual do PetShop Amigo Fiel. Converse de forma natural, calorosa e simpática, como uma atendente humana que ama animais faria no WhatsApp. Use linguagem informal mas profissional.
+    # --------------------------------------------------
+    # PROMPT DA IA
+    # --------------------------------------------------
 
-HOJE: {data_atual} ({dia_semana}) — HORA ATUAL: {hora_atual} (horário de Brasília)
-AMANHÃ: {amanha}
+    system_prompt = f"""
+Você é a Mari, atendente virtual do PetShop Amigo Fiel.
+
+Você conversa com clientes no WhatsApp como uma atendente humana.
+
+Seu objetivo é ajudar o cliente e agendar serviços para pets.
+
+DATA ATUAL: {data_atual}
+HORA ATUAL: {hora_atual}
+DIA: {dia_semana}
+
 {cliente_info}
 
-⚠️ REGRAS CRÍTICAS:
-- NUNCA invente horários disponíveis. SEMPRE use check_availability para buscar horários reais.
-- NUNCA diga que um dia é feriado sem ter certeza. Verifique a lista abaixo.
-- Se o cliente já tem pets cadastrados, use os dados existentes — não pergunte raça/peso de novo.
-- Se for cliente recorrente, seja mais íntima e chame pelo nome.
+--------------------------------------------------
 
-FERIADOS NACIONAIS 2026 (APENAS estes são feriados):
-- 01/01 (quinta) → Ano Novo
-- 16/02 (segunda) → Carnaval
-- 17/02 (terça) → Carnaval
-- 03/04 (sexta) → Sexta-feira Santa ← ATENÇÃO: apenas a sexta, não a semana toda
-- 21/04 (terça) → Tiradentes
-- 01/05 (sexta) → Dia do Trabalho
-- 04/06 (quinta) → Corpus Christi
-- 07/09 (segunda) → Independência
-- 12/10 (segunda) → Nossa Senhora Aparecida
-- 02/11 (segunda) → Finados
-- 15/11 (domingo) → Proclamação da República
-- 25/12 (sexta) → Natal
+ESTILO DE CONVERSA
 
-Segunda 06/04, Segunda 13/04 e todos os outros dias que não estão na lista acima são dias NORMAIS de funcionamento.
+Fale de forma natural como no WhatsApp.
 
-SERVIÇOS (use exatamente estas chaves no JSON):
-- "banho_simples" → Banho simples: R$ 40, 60 min
-- "banho_tosa" → Banho e tosa: R$ 70, 90 min
-- "tosa_higienica" → Tosa higiênica: R$ 35, 45 min
-- "consulta" → Consulta veterinária: R$ 120, 30 min
+Regras:
 
-HORÁRIOS: Segunda a sábado, 9h às 18h. Domingo sempre fechado.
+- use frases curtas
+- 1 ou 2 frases por mensagem
+- seja simpática
+- seja acolhedora
 
-IDENTIFICAÇÃO DE SERVIÇO:
-- "banho e tosa", "banho com tosa", "tosa completa" → banho_tosa
-- "banho", "banho simples" → banho_simples
-- "tosa higiênica", "higiênica" → tosa_higienica
-- "consulta", "veterinário", "vet" → consulta
+Use emojis moderados:
+🐾 😊 ✂️ 📅
 
-FLUXO DE AGENDAMENTO:
-1. Cliente quer agendar → pergunte serviço + data (e nome do pet se não souber)
-2. Com data → check_availability
-3. Cliente escolhe horário → se não souber raça/peso, pergunte. Se já souber, pule.
-4. Confirme resumo completo e peça confirmação
-5. Cliente confirma → create_appointment com todos os dados
+Se souber o nome do cliente → use.
 
-INFORMAÇÕES A COLETAR (só pergunte o que ainda não sabe):
-- Nome do pet (obrigatório — use o cadastrado se já existir)
-- Serviço desejado (obrigatório)
-- Data e horário (obrigatório)
-- Raça do pet (só pergunte se não tiver no cadastro)
-- Peso aproximado em kg (só pergunte se não tiver no cadastro)
-- Horário de busca/retirada (sempre pergunte)
+Exemplo:
+"Oi João! 😊"
 
-HUMANIZAÇÃO:
-- Chame o cliente pelo nome se souber
-- Mencione o pet pelo nome se souber
-- Use emojis com moderação
-- Pode dizer "Um momentinho! 🐾" antes de buscar horários
-- Para clientes recorrentes: "Que bom te ver de novo! 😊"
+Se souber o nome do pet → use também.
 
-RESUMO FINAL antes de confirmar:
-"Perfeito! Deixa eu confirmar tudo:
-🐾 Pet: [nome] ([raça], [peso]kg)
+--------------------------------------------------
+
+REGRAS CRÍTICAS
+
+Nunca invente horários disponíveis.
+
+Sempre use:
+check_availability
+
+para buscar horários livres.
+
+Nunca crie agendamento sem:
+
+- nome do cliente
+- nome do pet
+- serviço
+- data
+- horário
+
+Se faltar informação → pergunte.
+
+--------------------------------------------------
+
+HORÁRIO DE FUNCIONAMENTO
+
+Segunda a sábado
+09:00 às 18:00
+
+Domingo fechado
+
+--------------------------------------------------
+
+SERVIÇOS
+
+banho_simples
+banho_tosa
+tosa_higienica
+consulta
+
+--------------------------------------------------
+
+IDENTIFICAÇÃO
+
+"banho e tosa" → banho_tosa
+
+"banho" → banho_simples
+
+"higiênica" → tosa_higienica
+
+"consulta"
+"veterinário"
+
+→ consulta
+
+--------------------------------------------------
+
+FLUXO
+
+1 cliente quer agendar
+
+2 descobrir serviço
+
+3 perguntar data
+
+4 buscar horários
+
+5 cliente escolhe horário
+
+6 coletar dados do pet
+
+7 confirmar
+
+8 criar agendamento
+
+--------------------------------------------------
+
+CONFIRMAÇÃO
+
+Antes de criar agendamento envie:
+
+🐾 Pet: [nome]
 ✂️ Serviço: [serviço]
-📅 Data: [data] às [hora]
-🏠 Busca: [horário de busca]
+📅 Data: [data]
+🕐 Hora: [hora]
 
-Está tudo certinho? 😊"
+Pergunte:
 
-AÇÕES — responda SEMPRE em JSON puro, sem texto fora, sem markdown:
+"Está tudo certinho? 😊"
 
-{{"action": "check_availability", "date": "{data_atual}", "service": "banho_tosa"}}
+--------------------------------------------------
 
-{{"action": "create_appointment", "customer_name": "João", "pet_name": "Rex", "pet_breed": "Golden Retriever", "pet_weight": 30.0, "service": "banho_tosa", "datetime": "{data_atual}T15:00:00", "pickup_time": "18:00"}}
+FORMATO DE RESPOSTA
 
-{{"action": "list_appointments"}}
+Sempre JSON puro.
 
-{{"action": "cancel_appointment", "appointment_index": 1}}
+Sem markdown.
 
-{{"action": "reply", "message": "mensagem natural aqui"}}
+Exemplos:
 
-CAMPOS DO JSON:
-- "service": banho_simples | banho_tosa | tosa_higienica | consulta
-- "pet_breed": raça do pet (string, opcional)
-- "pet_weight": peso em kg (número decimal, opcional)
-- "pickup_time": horário de busca no formato "HH:MM" (opcional)
-- Sempre JSON puro, sem markdown, sem texto fora do JSON
-- Fale APENAS sobre serviços do petshop
+{{"action":"reply","message":"mensagem"}}
+
+{{"action":"check_availability","date":"{data_atual}","service":"banho_tosa"}}
+
+{{"action":"create_appointment",
+"customer_name":"João",
+"pet_name":"Rex",
+"pet_breed":"Golden Retriever",
+"pet_weight":30,
+"service":"banho_tosa",
+"datetime":"{data_atual}T15:00:00",
+"pickup_time":"18:00"
+}}
+
+{{"action":"list_appointments"}}
+
+{{"action":"cancel_appointment","appointment_index":1}}
+
+Responda APENAS com JSON.
+
 """
 
+    # --------------------------------------------------
+    # MENSAGENS
+    # --------------------------------------------------
+
     messages = [{"role": "system", "content": system_prompt}]
+
     messages.extend(conversation_history[-14:])
-    messages.append({"role": "user", "content": new_message})
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        temperature=0.3,
-        max_tokens=600
-    )
+    messages.append({
+        "role": "user",
+        "content": new_message
+    })
 
-    ai_text = response.choices[0].message.content.strip()
+    # --------------------------------------------------
+    # CHAMADA DA IA
+    # --------------------------------------------------
 
-    ai_text = re.sub(r'```json\s*', '', ai_text)
-    ai_text = re.sub(r'```\s*', '', ai_text)
-    ai_text = ai_text.strip()
+    try:
 
-    json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.3,
+            max_tokens=600
+        )
 
-    if json_match:
+        texto = response.choices[0].message.content.strip()
+
+        texto = limpar_json(texto)
+
         try:
-            result = json.loads(json_match.group())
-        except json.JSONDecodeError:
-            result = {"action": "reply", "message": ai_text}
-    else:
-        result = {"action": "reply", "message": ai_text}
 
-    return result
+            resultado = json.loads(texto)
 
+        except:
+
+            resultado = {
+                "action": "reply",
+                "message": texto
+            }
+
+        resultado = validar_resposta(resultado)
+
+        return resultado
+
+    except Exception as e:
+
+        return {
+            "action": "reply",
+            "message": "Tive um pequeno problema técnico 😅 pode repetir?"
+        }
+
+
+# --------------------------------------------------
+# TESTE LOCAL
+# --------------------------------------------------
 
 def test_ai():
-    print("Testando conexão com OpenAI...")
+
     history = []
-    resposta = chat_with_ai(history, "Oi, quero agendar um banho e tosa pro meu golden")
-    print(f"Bot: {resposta}")
+
+    resposta = chat_with_ai(
+        history,
+        "Oi queria agendar banho pro meu cachorro"
+    )
+
+    print(resposta)
 
 
 if __name__ == "__main__":

@@ -1,18 +1,19 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Appointment, Customer, Conversation, Service, Tenant
+from ..models import Appointment, Customer, Service, Tenant
 from datetime import datetime, timedelta
 import pytz
-import json
 
 router = APIRouter()
 
 BRASILIA = pytz.timezone("America/Sao_Paulo")
 
-def agora_brasilia():
+
+def agora():
     return datetime.now(BRASILIA).replace(tzinfo=None)
+
 
 STATUS_LABELS = {
     "confirmed": ("Confirmado", "#e8f5e9", "#2e7d32"),
@@ -22,333 +23,409 @@ STATUS_LABELS = {
     "cancelled": ("Cancelado", "#ffebee", "#c62828"),
 }
 
-# ── API para atualizar status ─────────────────────────────────────────────────
+# ------------------ API STATUS ------------------
+
 @router.post("/api/appointment/{appointment_id}/status")
-def update_status(appointment_id: str, request_data: dict, db: Session = Depends(get_db)):
-    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-    if not appointment:
+def update_status(appointment_id: str, data: dict, db: Session = Depends(get_db)):
+
+    appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+
+    if not appt:
         return JSONResponse({"error": "Agendamento não encontrado"}, status_code=404)
-    appointment.status = request_data.get("status", appointment.status)
+
+    appt.status = data.get("status", appt.status)
+
     db.commit()
-    return {"success": True, "status": appointment.status}
+
+    return {"success": True}
+
 
 @router.get("/api/appointment/{appointment_id}/cancel")
 def cancel_appt(appointment_id: str, db: Session = Depends(get_db)):
-    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-    if not appointment:
-        return JSONResponse({"error": "Não encontrado"}, status_code=404)
-    appointment.status = "cancelled"
+
+    appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+
+    if not appt:
+        return JSONResponse({"error": "Agendamento não encontrado"}, status_code=404)
+
+    appt.status = "cancelled"
+
     db.commit()
+
     return {"success": True}
 
-# ── Dashboard principal ───────────────────────────────────────────────────────
+
+# ------------------ CRIAR MANUAL ------------------
+
+@router.post("/api/manual-appointment")
+def create_manual(data: dict, db: Session = Depends(get_db)):
+
+    tenant = db.query(Tenant).first()
+
+    customer = Customer(
+        tenant_id=tenant.id,
+        name=data["customer_name"]
+    )
+
+    db.add(customer)
+    db.commit()
+    db.refresh(customer)
+
+    appt = Appointment(
+        tenant_id=tenant.id,
+        customer_id=customer.id,
+        pet_name=data["pet_name"],
+        scheduled_at=datetime.fromisoformat(data["datetime"]),
+        pickup_time=data.get("pickup_time"),
+        status="confirmed"
+    )
+
+    db.add(appt)
+    db.commit()
+
+    return {"success": True}
+
+
+# ------------------ DASHBOARD ------------------
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(db: Session = Depends(get_db)):
+
     tenant = db.query(Tenant).first()
+
     if not tenant:
-        return HTMLResponse("<h2>Nenhum tenant configurado ainda.</h2>")
+        return HTMLResponse("<h2>Nenhum tenant configurado</h2>")
 
-    tenant_name = tenant.name
-    tid = tenant.id
-    hoje = agora_brasilia()
-    inicio_hoje = hoje.replace(hour=0, minute=0, second=0, microsecond=0)
-    fim_hoje = hoje.replace(hour=23, minute=59, second=59, microsecond=0)
+    agora_dt = agora()
 
-    agendamentos_hoje = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
-        Appointment.scheduled_at >= inicio_hoje,
-        Appointment.scheduled_at <= fim_hoje,
+    inicio = agora_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    fim = agora_dt.replace(hour=23, minute=59, second=59)
+
+    agendamentos = db.query(Appointment).filter(
+        Appointment.tenant_id == tenant.id,
         Appointment.status != "cancelled"
     ).order_by(Appointment.scheduled_at).all()
 
-    proximos = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
-        Appointment.scheduled_at >= hoje,
-        Appointment.scheduled_at <= hoje + timedelta(days=7),
-        Appointment.status != "cancelled"
-    ).order_by(Appointment.scheduled_at).all()
+    hoje = []
+    futuros = []
 
-    total_clientes = db.query(Customer).filter(Customer.tenant_id == tid).count()
-    total_agendamentos = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
-        Appointment.status.in_(["confirmed", "in_progress", "ready", "delivered"])
-    ).count()
-    em_atendimento = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
-        Appointment.status == "in_progress"
-    ).count()
-    prontos = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
-        Appointment.status == "ready"
-    ).count()
+    for a in agendamentos:
 
-    # Cards de hoje
-    cards_hoje = ""
-    if not agendamentos_hoje:
-        cards_hoje = '<div class="empty-state">🐾 Nenhum agendamento para hoje</div>'
-    else:
-        for a in agendamentos_hoje:
-            customer = db.query(Customer).filter(Customer.id == a.customer_id).first()
-            service = db.query(Service).filter(Service.id == a.service_id).first()
-            nome_cliente = (customer.name or customer.phone) if customer else "Cliente"
-            nome_servico = service.name if service else "Serviço"
-            horario = a.scheduled_at.strftime("%H:%M")
-            label, bg, color = STATUS_LABELS.get(a.status, ("Confirmado", "#e8f5e9", "#2e7d32"))
+        if inicio <= a.scheduled_at <= fim:
+            hoje.append(a)
 
-            pet_info = a.pet_name or "Pet"
-            if a.pet_breed:
-                pet_info += f" · {a.pet_breed}"
-            if a.pet_weight:
-                pet_info += f" · {a.pet_weight}kg"
-            pickup = f"<div class='pickup'>🏠 Busca: {a.pickup_time}</div>" if a.pickup_time else ""
+        elif a.scheduled_at > agora_dt:
+            futuros.append(a)
 
-            status_options = ""
-            for key, (slabel, sbg, scolor) in STATUS_LABELS.items():
-                if key == "cancelled":
-                    continue
-                selected = "selected" if a.status == key else ""
-                status_options += f'<option value="{key}" {selected}>{slabel}</option>'
+    total_clientes = db.query(Customer).filter(Customer.tenant_id == tenant.id).count()
 
-            cards_hoje += f"""
-            <div class="appt-card" id="card-{a.id}">
-                <div class="appt-time">{horario}</div>
-                <div class="appt-body">
-                    <div class="appt-client">👤 {nome_cliente}</div>
-                    <div class="appt-pet">🐾 {pet_info}</div>
-                    <div class="appt-service">✂️ {nome_servico}</div>
-                    {pickup}
-                </div>
-                <div class="appt-actions">
-                    <div class="status-badge" style="background:{bg};color:{color}" id="badge-{a.id}">{label}</div>
-                    <select class="status-select" onchange="updateStatus('{a.id}', this.value)">
-                        {status_options}
-                    </select>
-                    <button class="btn-cancel" onclick="cancelAppt('{a.id}')">✕ Cancelar</button>
-                </div>
+    em_atendimento = len([a for a in agendamentos if a.status == "in_progress"])
+
+    prontos = len([a for a in agendamentos if a.status == "ready"])
+
+    # ------------------ CARDS HOJE ------------------
+
+    cards = ""
+
+    for a in hoje:
+
+        cliente = db.query(Customer).filter(Customer.id == a.customer_id).first()
+
+        nome = cliente.name if cliente else "Cliente"
+
+        horario = a.scheduled_at.strftime("%H:%M")
+
+        label, bg, color = STATUS_LABELS.get(a.status)
+
+        cards += f"""
+        <div class="appt">
+            <div class="time">{horario}</div>
+
+            <div class="info">
+                <b>{nome}</b><br>
+                🐾 {a.pet_name or "-"}
             </div>
-            """
 
-    # Tabela próximos 7 dias
-    rows_proximos = ""
-    if not proximos:
-        rows_proximos = '<tr><td colspan="7" class="empty-row">Nenhum agendamento nos próximos 7 dias.</td></tr>'
-    else:
-        for a in proximos:
-            customer = db.query(Customer).filter(Customer.id == a.customer_id).first()
-            service = db.query(Service).filter(Service.id == a.service_id).first()
-            nome_cliente = (customer.name or customer.phone) if customer else "Cliente"
-            nome_servico = service.name if service else "Serviço"
-            data = a.scheduled_at.strftime("%d/%m/%Y")
-            horario = a.scheduled_at.strftime("%H:%M")
-            label, bg, color = STATUS_LABELS.get(a.status, ("Confirmado", "#e8f5e9", "#2e7d32"))
-            pet = a.pet_name or "-"
-            raca = a.pet_breed or "-"
-            peso = f"{a.pet_weight}kg" if a.pet_weight else "-"
-            busca = a.pickup_time or "-"
+            <div class="actions">
 
-            rows_proximos += f"""
-            <tr>
-                <td>{data} {horario}</td>
-                <td>{nome_cliente}</td>
-                <td>{pet}</td>
-                <td>{raca} / {peso}</td>
-                <td>{nome_servico}</td>
-                <td>{busca}</td>
-                <td><span class="badge" style="background:{bg};color:{color}">{label}</span></td>
-            </tr>
-            """
+                <span class="badge" style="background:{bg};color:{color}">
+                {label}
+                </span>
 
-    html = f"""<!DOCTYPE html>
-<html lang="pt-BR">
+                <select onchange="updateStatus('{a.id}',this.value)">
+                    <option value="confirmed">Confirmado</option>
+                    <option value="in_progress">Em atendimento</option>
+                    <option value="ready">Pronto</option>
+                    <option value="delivered">Entregue</option>
+                </select>
+
+                <button onclick="cancelAppt('{a.id}')">Cancelar</button>
+
+            </div>
+        </div>
+        """
+
+    # ------------------ FUTUROS ------------------
+
+    rows = ""
+
+    for a in futuros[:20]:
+
+        cliente = db.query(Customer).filter(Customer.id == a.customer_id).first()
+
+        nome = cliente.name if cliente else "Cliente"
+
+        data = a.scheduled_at.strftime("%d/%m %H:%M")
+
+        rows += f"""
+        <tr>
+        <td>{data}</td>
+        <td>{nome}</td>
+        <td>{a.pet_name}</td>
+        <td>
+        <button onclick="cancelAppt('{a.id}')">Cancelar</button>
+        </td>
+        </tr>
+        """
+
+    html = f"""
+<html>
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{tenant_name} — Painel</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #333; }}
 
-        .header {{ background: linear-gradient(135deg, #6C5CE7, #a29bfe); color: white; padding: 18px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 10px rgba(108,92,231,0.3); }}
-        .header h1 {{ font-size: 22px; font-weight: 700; }}
-        .header-right {{ display: flex; align-items: center; gap: 16px; }}
-        .header span {{ font-size: 13px; opacity: 0.9; }}
-        .btn-refresh {{ background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; }}
-        .btn-refresh:hover {{ background: rgba(255,255,255,0.3); }}
+<meta name="viewport" content="width=device-width">
 
-        .container {{ max-width: 1300px; margin: 0 auto; padding: 24px 20px; }}
+<style>
 
-        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }}
-        .stat-card {{ background: white; border-radius: 14px; padding: 18px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid #6C5CE7; }}
-        .stat-card.orange {{ border-left-color: #fd79a8; }}
-        .stat-card.blue {{ border-left-color: #74b9ff; }}
-        .stat-card.green {{ border-left-color: #55efc4; }}
-        .stat-number {{ font-size: 32px; font-weight: 800; color: #6C5CE7; }}
-        .stat-card.orange .stat-number {{ color: #e17055; }}
-        .stat-card.blue .stat-number {{ color: #0984e3; }}
-        .stat-card.green .stat-number {{ color: #00b894; }}
-        .stat-label {{ font-size: 12px; color: #888; margin-top: 4px; font-weight: 500; }}
+body {{
+font-family: Arial;
+background:#f5f5f5;
+margin:0;
+}}
 
-        .section-title {{ font-size: 16px; font-weight: 700; color: #444; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }}
-        .badge-count {{ background: #6C5CE7; color: white; font-size: 11px; padding: 2px 8px; border-radius: 20px; }}
+body.dark {{
+background:#1e1e1e;
+color:white;
+}}
 
-        .card {{ background: white; border-radius: 14px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 20px; }}
+.header {{
+background:#6C5CE7;
+color:white;
+padding:15px;
+display:flex;
+justify-content:space-between;
+}}
 
-        .appt-card {{ display: flex; align-items: flex-start; gap: 16px; padding: 16px; border-radius: 10px; border: 1px solid #f0f0f0; margin-bottom: 12px; background: #fafafa; transition: box-shadow 0.2s; }}
-        .appt-card:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,0.08); }}
-        .appt-time {{ font-size: 22px; font-weight: 800; color: #6C5CE7; min-width: 65px; text-align: center; padding-top: 4px; }}
-        .appt-body {{ flex: 1; }}
-        .appt-client {{ font-size: 14px; font-weight: 700; color: #333; margin-bottom: 4px; }}
-        .appt-pet {{ font-size: 13px; color: #555; margin-bottom: 2px; }}
-        .appt-service {{ font-size: 12px; color: #888; }}
-        .pickup {{ font-size: 12px; color: #0984e3; margin-top: 4px; font-weight: 500; }}
-        .appt-actions {{ display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: 160px; }}
-        .status-badge {{ font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: 600; white-space: nowrap; }}
-        .status-select {{ font-size: 12px; padding: 5px 8px; border: 1px solid #ddd; border-radius: 8px; cursor: pointer; background: white; width: 100%; }}
-        .btn-cancel {{ font-size: 11px; color: #e17055; background: #fff5f5; border: 1px solid #ffccbc; padding: 4px 10px; border-radius: 8px; cursor: pointer; width: 100%; }}
-        .btn-cancel:hover {{ background: #ffebee; }}
+.container {{
+max-width:1100px;
+margin:auto;
+padding:20px;
+}}
 
-        .empty-state {{ color: #aaa; text-align: center; padding: 30px; font-size: 14px; }}
+.stats {{
+display:flex;
+gap:10px;
+margin-bottom:20px;
+}}
 
-        table {{ width: 100%; border-collapse: collapse; }}
-        th {{ text-align: left; font-size: 11px; color: #999; font-weight: 600; padding: 10px 12px; border-bottom: 2px solid #f0f0f0; text-transform: uppercase; letter-spacing: 0.5px; }}
-        td {{ font-size: 13px; padding: 12px 12px; border-bottom: 1px solid #f5f5f5; }}
-        tr:last-child td {{ border-bottom: none; }}
-        tr:hover td {{ background: #fafafa; }}
-        .empty-row {{ text-align: center; color: #aaa; padding: 30px !important; }}
-        .badge {{ font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: 600; white-space: nowrap; }}
+.stat {{
+background:white;
+padding:15px;
+border-radius:8px;
+flex:1;
+}}
 
-        .toast {{ position: fixed; bottom: 20px; right: 20px; background: #2d3436; color: white; padding: 12px 20px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity 0.3s; z-index: 999; }}
-        .toast.show {{ opacity: 1; }}
+.appt {{
+display:flex;
+justify-content:space-between;
+background:white;
+padding:12px;
+border-radius:8px;
+margin-bottom:10px;
+}}
 
-        @media (max-width: 768px) {{
-            .appt-card {{ flex-direction: column; }}
-            .appt-actions {{ width: 100%; flex-direction: row; flex-wrap: wrap; }}
-        }}
-    </style>
+.badge {{
+padding:3px 8px;
+border-radius:8px;
+font-size:12px;
+}}
+
+table {{
+width:100%;
+background:white;
+border-radius:8px;
+padding:10px;
+}}
+
+.modal {{
+display:none;
+position:fixed;
+inset:0;
+background:rgba(0,0,0,0.4);
+align-items:center;
+justify-content:center;
+}}
+
+.modal-content {{
+background:white;
+padding:20px;
+border-radius:10px;
+display:flex;
+flex-direction:column;
+gap:8px;
+}}
+
+</style>
+
 </head>
+
 <body>
 
 <div class="header">
-    <h1>🐾 {tenant_name}</h1>
-    <div class="header-right">
-        <span>Atualizado: {hoje.strftime("%d/%m/%Y %H:%M")}</span>
-        <button class="btn-refresh" onclick="location.reload()">↻ Atualizar</button>
-    </div>
+
+<b>{tenant.name}</b>
+
+<div>
+
+<button onclick="openModal()">Novo</button>
+<button onclick="toggleDark()">🌙</button>
+
+</div>
+
 </div>
 
 <div class="container">
 
-    <div class="stats">
-        <div class="stat-card">
-            <div class="stat-number">{len(agendamentos_hoje)}</div>
-            <div class="stat-label">📅 Agendamentos hoje</div>
-        </div>
-        <div class="stat-card orange">
-            <div class="stat-number">{em_atendimento}</div>
-            <div class="stat-label">✂️ Em atendimento</div>
-        </div>
-        <div class="stat-card blue">
-            <div class="stat-number">{prontos}</div>
-            <div class="stat-label">✅ Prontos p/ busca</div>
-        </div>
-        <div class="stat-card green">
-            <div class="stat-number">{total_clientes}</div>
-            <div class="stat-label">👤 Clientes cadastrados</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number">{total_agendamentos}</div>
-            <div class="stat-label">📊 Total agendamentos</div>
-        </div>
-    </div>
+<div class="stats">
 
-    <!-- Agenda de Hoje -->
-    <div class="card">
-        <div class="section-title">
-            📋 Agenda de Hoje
-            <span class="badge-count">{hoje.strftime("%d/%m")}</span>
-        </div>
-        {cards_hoje}
-    </div>
+<div class="stat">Hoje<br><b>{len(hoje)}</b></div>
 
-    <!-- Próximos 7 dias -->
-    <div class="card">
-        <div class="section-title">📆 Próximos 7 dias</div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Data / Hora</th>
-                    <th>Cliente</th>
-                    <th>Pet</th>
-                    <th>Raça / Peso</th>
-                    <th>Serviço</th>
-                    <th>Busca</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_proximos}
-            </tbody>
-        </table>
-    </div>
+<div class="stat">Em atendimento<br><b>{em_atendimento}</b></div>
+
+<div class="stat">Prontos<br><b>{prontos}</b></div>
+
+<div class="stat">Clientes<br><b>{total_clientes}</b></div>
 
 </div>
 
-<div class="toast" id="toast"></div>
+<h3>Agenda hoje</h3>
+
+{cards}
+
+<h3>Próximos agendamentos</h3>
+
+<table>
+
+<tr>
+
+<th>Data</th>
+<th>Cliente</th>
+<th>Pet</th>
+<th></th>
+
+</tr>
+
+{rows}
+
+</table>
+
+</div>
+
+
+<div class="modal" id="modal">
+
+<div class="modal-content">
+
+<input id="name" placeholder="Cliente">
+
+<input id="pet" placeholder="Pet">
+
+<input type="datetime-local" id="date">
+
+<input id="pickup" placeholder="Busca">
+
+<button onclick="create()">Salvar</button>
+
+</div>
+
+</div>
+
 
 <script>
-    function showToast(msg) {{
-        const t = document.getElementById('toast');
-        t.textContent = msg;
-        t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), 2500);
-    }}
 
-    async function updateStatus(id, status) {{
-        try {{
-            const res = await fetch(`/api/appointment/${{id}}/status`, {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify({{status}})
-            }});
-            const data = await res.json();
-            if (data.success) {{
-                showToast('✅ Status atualizado!');
-                setTimeout(() => location.reload(), 1000);
-            }}
-        }} catch(e) {{
-            showToast('❌ Erro ao atualizar status');
-        }}
-    }}
+function toggleDark(){{
 
-    async function cancelAppt(id) {{
-        if (!confirm('Cancelar este agendamento?')) return;
-        try {{
-            const res = await fetch(`/api/appointment/${{id}}/cancel`);
-            const data = await res.json();
-            if (data.success) {{
-                showToast('🗑️ Agendamento cancelado');
-                setTimeout(() => location.reload(), 1000);
-            }}
-        }} catch(e) {{
-            showToast('❌ Erro ao cancelar');
-        }}
-    }}
+document.body.classList.toggle("dark")
 
-    // Auto-refresh a cada 60 segundos
-    setTimeout(() => location.reload(), 60000);
+localStorage.setItem("dark",document.body.classList.contains("dark"))
+
+}}
+
+if(localStorage.getItem("dark")==="true"){{
+
+document.body.classList.add("dark")
+
+}}
+
+function openModal(){{
+
+document.getElementById("modal").style.display="flex"
+
+}}
+
+async function create(){{
+
+await fetch("/api/manual-appointment",{{
+
+method:"POST",
+
+headers:{{"Content-Type":"application/json"}},
+
+body:JSON.stringify({{
+
+customer_name:document.getElementById("name").value,
+
+pet_name:document.getElementById("pet").value,
+
+datetime:document.getElementById("date").value,
+
+pickup_time:document.getElementById("pickup").value
+
+}})
+
+}})
+
+location.reload()
+
+}}
+
+async function updateStatus(id,status){{
+
+await fetch(`/api/appointment/${{id}}/status`,{{
+method:"POST",
+headers:{{"Content-Type":"application/json"}},
+body:JSON.stringify({{status}})
+}})
+
+location.reload()
+
+}}
+
+async function cancelAppt(id){{
+
+if(!confirm("Cancelar agendamento?")) return
+
+await fetch(`/api/appointment/${{id}}/cancel`)
+
+location.reload()
+
+}}
+
 </script>
 
 </body>
-</html>"""
 
-    return HTMLResponse(content=html)
+</html>
+"""
 
-
-@router.get("/debug/tenants")
-def debug_tenants(db: Session = Depends(get_db)):
-    tenants = db.query(Tenant).all()
-    result = []
-    for t in tenants:
-        count = db.query(Appointment).filter(Appointment.tenant_id == t.id).count()
-        result.append({"id": t.id, "name": t.name, "appointments": count})
-    return result
+    return HTMLResponse(html)
