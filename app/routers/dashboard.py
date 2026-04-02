@@ -1,319 +1,275 @@
 from fastapi import APIRouter, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from ..database import get_db
-from ..models import Appointment, Customer, Tenant
-from datetime import datetime
-import pytz
+from app.database import get_db
+from app.models import Appointment
 
 router = APIRouter()
 
-BRASILIA = pytz.timezone("America/Sao_Paulo")
-
-def agora():
-    return datetime.now(BRASILIA).replace(tzinfo=None)
-
-STATUS_LABELS = {
-    "confirmed": ("Confirmado", "#22c55e"),
-    "in_progress": ("Em atendimento", "#f59e0b"),
-    "ready": ("Pronto", "#3b82f6"),
-    "delivered": ("Entregue", "#8b5cf6"),
-}
-
-# ---------------- STATUS ----------------
-
-@router.post("/api/appointment/{appointment_id}/status")
-def update_status(appointment_id: str, data: dict, db: Session = Depends(get_db)):
-
-    appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-
-    if not appt:
-        return JSONResponse({"error": "Agendamento não encontrado"}, status_code=404)
-
-    appt.status = data["status"]
-
-    db.commit()
-
-    return {"success": True}
-
-# ---------------- CANCELAR ----------------
-
-@router.get("/api/appointment/{appointment_id}/cancel")
-def cancel_appt(appointment_id: str, db: Session = Depends(get_db)):
-
-    appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-
-    if not appt:
-        return JSONResponse({"error": "Agendamento não encontrado"}, status_code=404)
-
-    appt.status = "cancelled"
-
-    db.commit()
-
-    return {"success": True}
-
-# ---------------- CRIAR ----------------
-
-@router.post("/api/manual-appointment")
-def create_manual(data: dict, db: Session = Depends(get_db)):
-
-    tenant = db.query(Tenant).first()
-
-    customer = Customer(
-        tenant_id=tenant.id,
-        name=data["customer_name"]
-    )
-
-    db.add(customer)
-    db.commit()
-    db.refresh(customer)
-
-    appt = Appointment(
-        tenant_id=tenant.id,
-        customer_id=customer.id,
-        pet_name=data["pet_name"],
-        scheduled_at=datetime.fromisoformat(data["datetime"]),
-        pickup_time=data.get("pickup_time"),
-        status="confirmed"
-    )
-
-    db.add(appt)
-    db.commit()
-
-    return {"success": True}
-
-# ---------------- DASHBOARD ----------------
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(db: Session = Depends(get_db)):
 
-    tenant = db.query(Tenant).first()
+    appointments = db.query(Appointment).all()
 
-    agendamentos = db.query(Appointment).filter(
-        Appointment.status != "cancelled"
-    ).order_by(Appointment.scheduled_at).all()
+    today_html = ""
+    future_html = ""
 
-    cards = ""
+    for a in appointments:
 
-    for a in agendamentos:
+        item = f"""
+        <div class="agenda-item">
+            <div>
+                <strong>{a.datetime}</strong><br>
+                {a.customer_name} - {a.pet_name}
+            </div>
 
-        cliente = db.query(Customer).filter(Customer.id == a.customer_id).first()
-        nome = cliente.name if cliente else "Cliente"
+            <div>
 
-        horario = a.scheduled_at.strftime("%H:%M")
+                <span class="status confirmado">{a.status}</span>
 
-        label,color = STATUS_LABELS.get(a.status)
+                <select onchange="updateStatus({a.id},this.value)">
+                    <option>Confirmado</option>
+                    <option>Em atendimento</option>
+                    <option>Finalizado</option>
+                </select>
 
-        cards += f"""
+                <button class="btn-danger" onclick="cancelAppointment({a.id})">X</button>
 
-        <div class="appt">
-
-        <div class="time">{horario}</div>
-
-        <div class="info">
-
-        <b>{nome}</b><br>
-        🐾 {a.pet_name}
-
+            </div>
         </div>
-
-        <div class="actions">
-
-        <span class="badge" style="background:{color}20;color:{color}">{label}</span>
-
-        <select onchange="updateStatus('{a.id}',this.value)">
-
-        <option value="confirmed">Confirmado</option>
-        <option value="in_progress">Em atendimento</option>
-        <option value="ready">Pronto</option>
-        <option value="delivered">Entregue</option>
-
-        </select>
-
-        <button onclick="cancelAppt('{a.id}')">✖</button>
-
-        </div>
-
-        </div>
-
         """
 
-    html = f"""
+        today_html += item
 
+    return f"""
+<!DOCTYPE html>
 <html>
-
 <head>
 
-<meta name="viewport" content="width=device-width">
+<meta charset="UTF-8">
+
+<title>Dashboard</title>
 
 <style>
 
 body {{
-font-family:system-ui;
-background:#f3f4f6;
+font-family: Arial;
+background:#f4f6fb;
 margin:0;
 }}
 
-.header {{
-background:linear-gradient(90deg,#6C5CE7,#7C3AED);
+.dark {{
+background:#1e1e2f;
 color:white;
-padding:16px;
+}}
+
+header {{
+background:linear-gradient(90deg,#6c63ff,#7a6cff);
+padding:20px;
+color:white;
 display:flex;
 justify-content:space-between;
 }}
 
 .container {{
-max-width:1000px;
+max-width:1100px;
 margin:auto;
 padding:20px;
 }}
 
-.appt {{
+.cards {{
+display:grid;
+grid-template-columns:repeat(4,1fr);
+gap:15px;
+margin-bottom:20px;
+}}
+
+.card {{
 background:white;
+padding:15px;
 border-radius:10px;
-padding:14px;
-margin-bottom:12px;
+box-shadow:0 3px 8px rgba(0,0,0,0.08);
+}}
+
+.dark .card {{
+background:#2b2b3d;
+}}
+
+.agenda-item {{
+background:white;
+padding:15px;
+border-radius:10px;
+margin-bottom:10px;
 display:flex;
 justify-content:space-between;
 align-items:center;
-box-shadow:0 3px 10px rgba(0,0,0,0.05);
 }}
 
-.time {{
-font-weight:bold;
-font-size:18px;
-}}
-
-.badge {{
-padding:4px 8px;
-border-radius:6px;
-font-size:12px;
+.dark .agenda-item {{
+background:#2b2b3d;
 }}
 
 button {{
 border:none;
-background:#ef4444;
-color:white;
-padding:6px 10px;
+padding:8px 12px;
 border-radius:6px;
 cursor:pointer;
 }}
 
-select {{
-padding:4px;
-border-radius:6px;
+.btn-danger {{
+background:#ff5c5c;
+color:white;
 }}
 
-.modal {{
-display:none;
-position:fixed;
-inset:0;
-background:rgba(0,0,0,0.5);
-align-items:center;
-justify-content:center;
+.status {{
+padding:4px 8px;
+border-radius:5px;
+font-size:12px;
+background:#d7f3df;
+color:#0a7b2d;
 }}
 
-.modal-content {{
+table {{
+width:100%;
+border-collapse:collapse;
 background:white;
-padding:20px;
 border-radius:10px;
-display:flex;
-flex-direction:column;
-gap:8px;
-width:300px;
 }}
 
-input {{
-padding:8px;
-border-radius:6px;
-border:1px solid #ddd;
+th,td {{
+padding:12px;
+border-bottom:1px solid #eee;
 }}
 
 </style>
 
 </head>
 
+
 <body>
 
-<div class="header">
+<header>
 
-<b>{tenant.name}</b>
+<h2>Agenda do Petshop</h2>
 
-<button onclick="openModal()">Novo</button>
+<div>
+
+<button onclick="novoAgendamento()">Novo</button>
+<button onclick="toggleDark()">🌙</button>
 
 </div>
+
+</header>
+
 
 <div class="container">
 
-{cards}
+
+<div class="cards">
+
+<div class="card">
+Hoje
+<h2>{len(appointments)}</h2>
+</div>
+
+<div class="card">
+Em atendimento
+<h2>0</h2>
+</div>
+
+<div class="card">
+Finalizados
+<h2>0</h2>
+</div>
+
+<div class="card">
+Clientes
+<h2>{len(set([a.customer_name for a in appointments]))}</h2>
+</div>
 
 </div>
 
-<div class="modal" id="modal">
 
-<div class="modal-content">
+<h3>Agenda de hoje</h3>
 
-<input id="name" placeholder="Cliente">
+{today_html}
 
-<input id="pet" placeholder="Pet">
-
-<input type="datetime-local" id="date">
-
-<input id="pickup" placeholder="Busca">
-
-<button onclick="create()">Salvar</button>
 
 </div>
 
-</div>
 
 <script>
 
-function openModal(){{
-document.getElementById("modal").style.display="flex"
+function toggleDark(){{
+
+document.body.classList.toggle("dark")
+
+localStorage.setItem("darkMode",
+document.body.classList.contains("dark"))
+
 }}
 
-async function create(){{
+if(localStorage.getItem("darkMode")==="true"){{
 
-let name=document.getElementById("name").value
-let pet=document.getElementById("pet").value
-let date=document.getElementById("date").value
+document.body.classList.add("dark")
 
-if(!name||!pet||!date){{
-alert("Preencha todos os campos")
-return
 }}
 
-await fetch("/api/manual-appointment",{{
-method:"POST",
+
+
+async function updateStatus(id,status){{
+
+await fetch(`/api/appointment/${{id}}/status`,{{
+method:"PUT",
 headers:{{"Content-Type":"application/json"}},
-body:JSON.stringify({{
-customer_name:name,
-pet_name:pet,
-datetime:date,
-pickup_time:document.getElementById("pickup").value
+body:JSON.stringify({{status:status}})
 }})
-}})
+
+}}
+
+
+
+async function cancelAppointment(id){{
+
+if(!confirm("Cancelar agendamento?")) return
+
+await fetch(`/api/appointment/${{id}}`,{{method:"DELETE"}})
 
 location.reload()
 
 }}
 
-async function updateStatus(id,status){{
 
-await fetch(`/api/appointment/${{id}}/status`,{{
-method:"POST",
-headers:{{"Content-Type":"application/json"}},
-body:JSON.stringify({{status}})
-}})
+
+async function novoAgendamento(){{
+
+let name = prompt("Nome do cliente")
+let pet = prompt("Nome do pet")
+let date = prompt("Data e hora (YYYY-MM-DD HH:MM)")
+
+if(!name || !pet || !date){{
+
+alert("Preencha tudo")
+return
 
 }}
 
-async function cancelAppt(id){{
+await fetch("/api/manual-appointment",{{
 
-if(!confirm("Cancelar agendamento?")) return
+method:"POST",
 
-await fetch(`/api/appointment/${{id}}/cancel`)
+headers:{{"Content-Type":"application/json"}},
+
+body:JSON.stringify({{
+
+customer_name:name,
+pet_name:pet,
+datetime:date
+
+}})
+
+}})
 
 location.reload()
 
@@ -322,8 +278,5 @@ location.reload()
 </script>
 
 </body>
-
 </html>
 """
-
-    return HTMLResponse(html)
