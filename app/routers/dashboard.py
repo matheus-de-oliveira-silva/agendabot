@@ -79,21 +79,33 @@ def create_appt(request_data: dict, db: Session = Depends(get_db)):
             customer = Customer(
                 tenant_id=tenant.id,
                 name=customer_name,
-                phone=""
+                phone="manual"  # campo obrigatório no modelo
             )
             db.add(customer)
             db.flush()
 
-        # Busca serviço
+        # Busca serviço pelo name (modelo não tem campo 'key')
+        service_name = SERVICES_MAP.get(service_key, "")
         service = db.query(Service).filter(
             Service.tenant_id == tenant.id,
-            Service.key == service_key
+            Service.name == service_name,
+            Service.active == True
         ).first()
+
+        # Se não achar pelo name exato, pega qualquer serviço ativo como fallback
+        if not service:
+            service = db.query(Service).filter(
+                Service.tenant_id == tenant.id,
+                Service.active == True
+            ).first()
+
+        if not service:
+            return JSONResponse({"error": "Nenhum serviço cadastrado no sistema. Verifique os serviços no banco."}, status_code=400)
 
         appointment = Appointment(
             tenant_id=tenant.id,
             customer_id=customer.id,
-            service_id=service.id if service else None,
+            service_id=service.id,
             pet_name=pet_name,
             pet_breed=pet_breed or None,
             pet_weight=float(pet_weight) if pet_weight else None,
@@ -965,8 +977,11 @@ def dashboard(db: Session = Depends(get_db)):
         btn.textContent = 'Confirmar Agendamento';
     }}
 
-    // Auto-refresh a cada 60 segundos
-    setTimeout(() => location.reload(), 60000);
+    // Auto-refresh a cada 60 segundos — pausa se modal estiver aberto
+    setInterval(() => {
+        const modalAberto = document.getElementById('modalOverlay').classList.contains('open');
+        if (!modalAberto) location.reload();
+    }, 60000);
 </script>
 
 </body>
