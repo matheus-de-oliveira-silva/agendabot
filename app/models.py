@@ -91,3 +91,4 @@ class Conversation(Base):
     messages = Column(Text, default="[]")
     state = Column(String, default="idle")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    
