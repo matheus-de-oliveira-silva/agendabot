@@ -6,10 +6,7 @@ import asyncio
 load_dotenv()
 
 from .database import engine, Base
-from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook
-
-from .routers import ..., admin
-app.include_router(admin.router)
+from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook, admin
 
 Base.metadata.create_all(bind=engine)
 
@@ -51,6 +48,7 @@ app.include_router(appointments.router)
 app.include_router(telegram_webhook.router)
 app.include_router(dashboard.router)
 app.include_router(whatsapp_webhook.router)
+app.include_router(admin.router)
 
 
 @app.get("/")
@@ -104,8 +102,9 @@ def setup_tenant(data: dict):
         return {"tenant_id": tenant.id, "message": "criado com sucesso"}
     finally:
         db.close()
+
 @app.post("/admin/migrate")
-def migrate(db_session = None):
+def migrate(db_session=None):
     from .database import engine
     from sqlalchemy import text
     with engine.connect() as conn:
@@ -131,6 +130,7 @@ def migrate(db_session = None):
         """))
         conn.commit()
     return {"success": True, "message": "Migration concluída!"}
+
 @app.post("/admin/rename-tenant")
 def rename_tenant(data: dict):
     from .database import SessionLocal
@@ -145,3 +145,4 @@ def rename_tenant(data: dict):
         return {"success": True, "name": tenant.name}
     finally:
         db.close()
+        
