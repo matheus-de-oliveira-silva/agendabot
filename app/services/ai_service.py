@@ -9,7 +9,6 @@ import re
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 BRASILIA = pytz.timezone("America/Sao_Paulo")
 
 
@@ -17,7 +16,46 @@ def agora_brasilia() -> datetime:
     return datetime.now(BRASILIA).replace(tzinfo=None)
 
 
-def chat_with_ai(conversation_history: list, new_message: str, customer_context: dict = None) -> dict:
+def build_services_prompt(services: list) -> str:
+    """Monta a seção de serviços dinamicamente do banco."""
+    if not services:
+        return "Nenhum serviço cadastrado no momento."
+    lines = []
+    for s in services:
+        price = f"R$ {s['price']/100:.2f}" if s.get('price') else "Grátis"
+        desc = f" — {s['description']}" if s.get('description') else ""
+        lines.append(f'- "{s["key"]}" → {s["name"]}: {price}, {s["duration_min"]}min{desc}')
+    return "\n".join(lines)
+
+
+def build_hours_prompt(tenant_config: dict) -> str:
+    """Monta texto de horário de funcionamento dinamicamente."""
+    days_map = {
+        "0": "segunda-feira", "1": "terça-feira", "2": "quarta-feira",
+        "3": "quinta-feira", "4": "sexta-feira", "5": "sábado", "6": "domingo"
+    }
+    days_short = {
+        "0": "Seg", "1": "Ter", "2": "Qua",
+        "3": "Qui", "4": "Sex", "5": "Sáb", "6": "Dom"
+    }
+    open_days = [d.strip() for d in (tenant_config.get("open_days") or "0,1,2,3,4,5").split(",")]
+    closed_days = [days_map[d] for d in ["0","1","2","3","4","5","6"] if d not in open_days]
+    open_time = tenant_config.get("open_time") or "09:00"
+    close_time = tenant_config.get("close_time") or "18:00"
+    open_names = [days_short[d] for d in open_days if d in days_short]
+    text = f"{', '.join(open_names)} das {open_time} às {close_time}."
+    if closed_days:
+        text += f" Fechado: {', '.join(closed_days)}."
+    return text
+
+
+def chat_with_ai(
+    conversation_history: list,
+    new_message: str,
+    customer_context: dict = None,
+    tenant_config: dict = None,
+    services: list = None
+) -> dict:
     agora = agora_brasilia()
     data_atual = agora.strftime("%Y-%m-%d")
     hora_atual = agora.strftime("%H:%M")
@@ -25,21 +63,37 @@ def chat_with_ai(conversation_history: list, new_message: str, customer_context:
     dia_semana = ["segunda-feira", "terça-feira", "quarta-feira",
                   "quinta-feira", "sexta-feira", "sábado", "domingo"][agora.weekday()]
 
-    # Monta contexto do cliente para a IA
+    # Config do tenant
+    cfg = tenant_config or {}
+    attendant_name = cfg.get("bot_attendant_name") or "Mari"
+    business_name = cfg.get("bot_business_name") or cfg.get("display_name") or cfg.get("name") or "nosso estabelecimento"
+    subject = cfg.get("subject_label") or "Pet"
+    subject_plural = cfg.get("subject_label_plural") or "Pets"
+
+    # Horário de funcionamento
+    hours_text = build_hours_prompt(cfg)
+
+    # Serviços dinâmicos
+    services_text = build_services_prompt(services or [])
+
+    # Identificação de serviço (para o modelo entender as chaves)
+    service_keys = ""
+    if services:
+        for s in services:
+            service_keys += f'- "{s["name"].lower()}", variações → use a chave "{s["key"]}"\n'
+
+    # Contexto do cliente
     cliente_info = ""
     nome_cliente_conhecido = False
-
     if customer_context:
         nome = customer_context.get("name", "")
         pets = customer_context.get("pets", [])
         agendamentos_anteriores = customer_context.get("total_appointments", 0)
-
         if nome:
             nome_cliente_conhecido = True
             cliente_info += f"\nNOME DO CLIENTE: {nome}"
-
         if pets:
-            cliente_info += f"\nPETS CONHECIDOS:"
+            cliente_info += f"\n{subject_plural.upper()} CONHECIDOS:"
             for pet in pets:
                 pet_str = f"\n  - {pet['name']}"
                 if pet.get("breed"):
@@ -48,7 +102,6 @@ def chat_with_ai(conversation_history: list, new_message: str, customer_context:
                         pet_str += f", {pet['weight']}kg"
                     pet_str += ")"
                 cliente_info += pet_str
-
         if agendamentos_anteriores > 0:
             cliente_info += f"\nCLIENTE RECORRENTE: sim ({agendamentos_anteriores} agendamentos anteriores)"
         else:
@@ -56,7 +109,10 @@ def chat_with_ai(conversation_history: list, new_message: str, customer_context:
 
     nome_status = "JÁ CONHECIDO" if nome_cliente_conhecido else "DESCONHECIDO — pergunte na primeira resposta antes de qualquer outra coisa"
 
-    system_prompt = f"""Você é a Mari, atendente virtual do PetShop Amigo Fiel. Converse de forma natural, calorosa e simpática, como uma atendente humana que ama animais faria no WhatsApp. Use linguagem informal mas profissional.
+    # Chave de serviço válida para o JSON de exemplo
+    example_service_key = services[0]["key"] if services else "servico"
+
+    system_prompt = f"""Você é {attendant_name}, atendente virtual de {business_name}. Converse de forma natural, calorosa e simpática, como uma atendente humana que ama animais faria no WhatsApp. Use linguagem informal mas profissional.
 
 HOJE: {data_atual} ({dia_semana}) — HORA ATUAL: {hora_atual} (horário de Brasília)
 AMANHÃ: {amanha}
@@ -65,85 +121,72 @@ AMANHÃ: {amanha}
 STATUS DO NOME DO CLIENTE: {nome_status}
 
 ⚠️ REGRAS CRÍTICAS — NUNCA viole estas regras:
-1. NOME OBRIGATÓRIO ANTES DE QUALQUER AÇÃO: Se o nome do cliente for DESCONHECIDO, sua PRIMEIRA resposta DEVE pedir o nome. Não avance para nenhuma etapa do agendamento sem ter o nome. Nem cheque horários, nem pergunte raça, nem confirme nada — primeiro o nome.
+1. NOME OBRIGATÓRIO ANTES DE QUALQUER AÇÃO: Se o nome do cliente for DESCONHECIDO, sua PRIMEIRA resposta DEVE pedir o nome. Não avance para nenhuma etapa do agendamento sem ter o nome.
 2. NUNCA invente horários disponíveis. SEMPRE use check_availability para buscar horários reais.
-3. NUNCA diga que um dia é feriado sem ter certeza. Verifique a lista abaixo.
-4. Se o cliente já tem pets cadastrados, use os dados existentes — não pergunte raça/peso de novo.
+3. NUNCA diga que um dia é feriado sem ter certeza.
+4. Se o cliente já tem {subject_plural.lower()} cadastrados, use os dados existentes.
 5. Se for cliente recorrente, seja mais íntima e chame pelo nome.
 6. Sempre confirme o resumo completo ANTES de chamar create_appointment.
-7. NUNCA chame create_appointment sem ter: nome do cliente, nome do pet, raça, peso, serviço, data, horário e horário de busca.
+7. NUNCA chame create_appointment sem ter: nome do cliente, nome do {subject.lower()}, raça, peso, serviço, data, horário e horário de busca.
+8. Use APENAS os serviços listados abaixo. Não invente serviços que não existem.
+9. Preços informados devem ser EXATAMENTE os listados abaixo. Nunca invente preço.
 
-FERIADOS NACIONAIS 2026 (APENAS estes são feriados):
-- 01/01 (quinta) → Ano Novo
-- 16/02 (segunda) → Carnaval
-- 17/02 (terça) → Carnaval
-- 03/04 (sexta) → Sexta-feira Santa ← ATENÇÃO: apenas a sexta, não a semana toda
-- 21/04 (terça) → Tiradentes
-- 01/05 (sexta) → Dia do Trabalho
-- 04/06 (quinta) → Corpus Christi
-- 07/09 (segunda) → Independência
-- 12/10 (segunda) → Nossa Senhora Aparecida
-- 02/11 (segunda) → Finados
-- 15/11 (domingo) → Proclamação da República
-- 25/12 (sexta) → Natal
+FERIADOS NACIONAIS 2026:
+- 01/01 → Ano Novo | 16-17/02 → Carnaval | 03/04 → Sexta-feira Santa
+- 21/04 → Tiradentes | 01/05 → Dia do Trabalho | 04/06 → Corpus Christi
+- 07/09 → Independência | 12/10 → N. Sra. Aparecida | 02/11 → Finados
+- 15/11 → Proclamação da República | 25/12 → Natal
 
-Segunda 06/04, Segunda 13/04 e todos os outros dias que não estão na lista acima são dias NORMAIS de funcionamento.
+HORÁRIOS DE FUNCIONAMENTO:
+{hours_text}
 
-SERVIÇOS (use exatamente estas chaves no JSON):
-- "banho_simples" → Banho simples: R$ 40, 60 min
-- "banho_tosa" → Banho e tosa: R$ 70, 90 min
-- "tosa_higienica" → Tosa higiênica: R$ 35, 45 min
-- "consulta" → Consulta veterinária: R$ 120, 30 min
-
-HORÁRIOS: Segunda a sábado, 9h às 18h. Domingo sempre fechado.
+SERVIÇOS DISPONÍVEIS (use EXATAMENTE as chaves indicadas no JSON):
+{services_text}
 
 IDENTIFICAÇÃO DE SERVIÇO:
-- "banho e tosa", "banho com tosa", "tosa completa" → banho_tosa
-- "banho", "banho simples" → banho_simples
-- "tosa higiênica", "higiênica" → tosa_higienica
-- "consulta", "veterinário", "vet" → consulta
+{service_keys}
 
-FLUXO DE AGENDAMENTO (siga esta ordem rigorosamente):
-1. Se nome desconhecido → peça o nome PRIMEIRO, antes de qualquer outra coisa
+FLUXO DE AGENDAMENTO (siga rigorosamente):
+1. Se nome desconhecido → peça o nome PRIMEIRO
 2. Cliente quer agendar → confirme serviço + data desejada
 3. Com data → check_availability
-4. Cliente escolhe horário → se não souber raça/peso, pergunte. Se já souber, pule.
+4. Cliente escolhe horário → se não souber raça/peso, pergunte
 5. Pergunte o horário de busca/retirada
-6. Confirme RESUMO COMPLETO e peça confirmação explícita ("está tudo certo?")
+6. Confirme RESUMO COMPLETO e peça confirmação explícita
 7. Cliente confirma → create_appointment com TODOS os dados
 
-INFORMAÇÕES A COLETAR (só pergunte o que ainda não sabe):
-- Nome do cliente (OBRIGATÓRIO — pergunte PRIMEIRO se desconhecido, NUNCA pule)
-- Nome do pet (obrigatório — use o cadastrado se já existir)
+INFORMAÇÕES A COLETAR:
+- Nome do cliente (OBRIGATÓRIO — pergunte PRIMEIRO se desconhecido)
+- Nome do {subject.lower()} (obrigatório)
 - Serviço desejado (obrigatório)
 - Data e horário (obrigatório)
-- Raça do pet (só pergunte se não tiver no cadastro)
-- Peso aproximado em kg (só pergunte se não tiver no cadastro)
+- Raça do {subject.lower()} (pergunte se não tiver no cadastro)
+- Peso em kg (pergunte se não tiver no cadastro)
 - Horário de busca/retirada (sempre pergunte)
 
 HUMANIZAÇÃO:
 - Chame o cliente pelo nome se souber
-- Mencione o pet pelo nome se souber
+- Mencione o {subject.lower()} pelo nome se souber
 - Use emojis com moderação
-- Pode dizer "Um momentinho! 🐾" antes de buscar horários
+- Diga "Um momentinho! 🐾" antes de buscar horários
 - Para clientes recorrentes: "Que bom te ver de novo! 😊"
-- Use abreviações comuns como "vc", "tbm", "obg", mas sem perder a clareza
+- Use abreviações comuns: "vc", "tbm", "obg"
 
-RESUMO FINAL antes de confirmar (use exatamente este formato):
+RESUMO FINAL antes de confirmar:
 "Perfeito! Deixa eu confirmar tudo:
-🐾 Pet: [nome] ([raça], [peso]kg)
-👤 Cliente: [nome do cliente]
-✂️ Serviço: [serviço]
+🐾 {subject}: [nome] ([raça], [peso]kg)
+👤 Cliente: [nome]
+✂️ Serviço: [serviço] — [preço]
 📅 Data: [data] às [hora]
-🏠 Busca: [horário de busca]
+🏠 Busca: [horário]
 
 Está tudo certinho? 😊"
 
 AÇÕES — responda SEMPRE em JSON puro, sem texto fora, sem markdown:
 
-{{"action": "check_availability", "date": "{data_atual}", "service": "banho_tosa"}}
+{{"action": "check_availability", "date": "{data_atual}", "service": "{example_service_key}"}}
 
-{{"action": "create_appointment", "customer_name": "João", "pet_name": "Rex", "pet_breed": "Golden Retriever", "pet_weight": 30.0, "service": "banho_tosa", "datetime": "{data_atual}T15:00:00", "pickup_time": "18:00"}}
+{{"action": "create_appointment", "customer_name": "João", "pet_name": "Rex", "pet_breed": "Golden Retriever", "pet_weight": 30.0, "service": "{example_service_key}", "datetime": "{data_atual}T15:00:00", "pickup_time": "18:00"}}
 
 {{"action": "list_appointments"}}
 
@@ -151,13 +194,13 @@ AÇÕES — responda SEMPRE em JSON puro, sem texto fora, sem markdown:
 
 {{"action": "reply", "message": "mensagem natural aqui"}}
 
-CAMPOS DO JSON:
-- "service": banho_simples | banho_tosa | tosa_higienica | consulta
-- "pet_breed": raça do pet (string, opcional)
-- "pet_weight": peso em kg (número decimal, opcional)
-- "pickup_time": horário de busca no formato "HH:MM" (opcional)
-- Sempre JSON puro, sem markdown, sem texto fora do JSON
-- Fale APENAS sobre serviços do petshop
+CAMPOS:
+- "service": use APENAS as chaves listadas acima em SERVIÇOS DISPONÍVEIS
+- "pet_breed": raça (string)
+- "pet_weight": peso em kg (número)
+- "pickup_time": horário "HH:MM"
+- Sempre JSON puro, sem markdown
+- Fale APENAS sobre serviços deste estabelecimento
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -172,13 +215,11 @@ CAMPOS DO JSON:
     )
 
     ai_text = response.choices[0].message.content.strip()
-
     ai_text = re.sub(r'```json\s*', '', ai_text)
     ai_text = re.sub(r'```\s*', '', ai_text)
     ai_text = ai_text.strip()
 
     json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
-
     if json_match:
         try:
             result = json.loads(json_match.group())
@@ -193,9 +234,23 @@ CAMPOS DO JSON:
 def test_ai():
     print("Testando conexão com OpenAI...")
     history = []
-    resposta = chat_with_ai(history, "Oi, quero agendar um banho e tosa pro meu golden")
+    fake_services = [
+        {"key": "banho_tosa", "name": "Banho e Tosa", "price": 7000, "duration_min": 90, "description": "Banho completo com tosa"},
+        {"key": "banho_simples", "name": "Banho Simples", "price": 4000, "duration_min": 60, "description": "Banho com secagem"},
+    ]
+    fake_config = {
+        "bot_attendant_name": "Mari",
+        "bot_business_name": "PetShop Teste",
+        "open_days": "0,1,2,3,4,5",
+        "open_time": "09:00",
+        "close_time": "18:00",
+        "subject_label": "Pet",
+        "subject_label_plural": "Pets",
+    }
+    resposta = chat_with_ai(history, "Oi, quero agendar um banho e tosa", tenant_config=fake_config, services=fake_services)
     print(f"Bot: {resposta}")
 
 
 if __name__ == "__main__":
     test_ai()
+    
