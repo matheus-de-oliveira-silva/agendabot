@@ -211,7 +211,7 @@ CAMPOS:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        temperature=10.0,
+        temperature=0.9,
         max_tokens=600
     )
 
