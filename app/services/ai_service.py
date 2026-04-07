@@ -155,6 +155,7 @@ FLUXO DE AGENDAMENTO (siga rigorosamente):
 5. Pergunte o horário de busca/retirada
 6. Confirme RESUMO COMPLETO e peça confirmação explícita
 7. Cliente confirma → create_appointment com TODOS os dados
+8. Sempre leia com atenção as informações de todas as mensagens, exemplo se o cliente falar algo como: " oi, quero um banho para meu cachorro as 15:00 amanha", não há necessidade de perguntar as informações novamente, somente pergunte se o horario não estiver disponível, ou se ele não disse um horário especifico, ou se ele não especificou o serviço. se ele ja falou o nome do pet, raça, peso, ou qualquer outra informação no momento das primeiras mensagens, não pergunte novamente, somente confirme no resumo final.
 
 INFORMAÇÕES A COLETAR:
 - Nome do cliente (OBRIGATÓRIO — pergunte PRIMEIRO se desconhecido)
@@ -211,7 +212,7 @@ CAMPOS:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        temperature=0.9,
+        temperature=1.5,
         max_tokens=600
     )
 
