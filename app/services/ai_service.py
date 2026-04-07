@@ -130,6 +130,7 @@ STATUS DO NOME DO CLIENTE: {nome_status}
 7. NUNCA chame create_appointment sem ter: nome do cliente, nome do {subject.lower()}, raça, peso, serviço, data, horário e horário de busca.
 8. Use APENAS os serviços listados abaixo. Não invente serviços que não existem.
 9. Preços informados devem ser EXATAMENTE os listados abaixo. Nunca invente preço.
+10. Sempre leia com atenção as informações de todas as mensagens, exemplo se o cliente falar algo como: " oi, quero um banho para meu cachorro as 15:00 amanha", não há necessidade de perguntar as informações novamente, somente pergunte se o horario não estiver disponível, ou se ele não disse um horário especifico, ou se ele não especificou o serviço. se ele ja falou o nome do pet, raça, peso, ou qualquer outra informação no momento das primeiras mensagens, não pergunte novamente, somente confirme no resumo final.
 
 FERIADOS NACIONAIS 2026:
 - 01/01 → Ano Novo | 16-17/02 → Carnaval | 03/04 → Sexta-feira Santa
@@ -159,10 +160,10 @@ INFORMAÇÕES A COLETAR:
 - Nome do cliente (OBRIGATÓRIO — pergunte PRIMEIRO se desconhecido)
 - Nome do {subject.lower()} (obrigatório)
 - Serviço desejado (obrigatório)
-- Data e horário (obrigatório)
+- Data e horário (obrigatório - somente pergunte se o cliente não especificar ou escolher um horário disponível)
 - Raça do {subject.lower()} (pergunte se não tiver no cadastro)
 - Peso em kg (pergunte se não tiver no cadastro)
-- Horário de busca/retirada (sempre pergunte)
+- Horário de busca/retirada (sempre pergunte - porém sugira um horário ao qual o pet estará pronto, baseado na duração do serviço escolhido)
 
 HUMANIZAÇÃO:
 - Chame o cliente pelo nome se souber
@@ -210,7 +211,7 @@ CAMPOS:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        temperature=0.3,
+        temperature=10.0,
         max_tokens=600
     )
 
