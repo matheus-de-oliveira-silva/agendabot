@@ -18,6 +18,7 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "agendabot")
 
+
 def get_tenant_services(db, tenant_id: str) -> list:
     services = db.query(Service).filter(Service.tenant_id == tenant_id, Service.active == True).all()
     result = []
@@ -89,17 +90,84 @@ def should_reset_conversation(conversation) -> bool:
     agora = datetime.now(BRASILIA).replace(tzinfo=None)
     return (agora - conversation.updated_at) > timedelta(hours=24)
 
+def _find_tenant_for_whatsapp(db, body: dict):
+    """
+    Descobre qual tenant deve receber a mensagem.
+
+    Estratégia (em ordem de prioridade):
+    1. Tenta achar pelo instance name da Evolution API (campo 'instance')
+       mapeado pelo phone_number_id configurado no tenant.
+    2. Tenta pelo número de destino da mensagem (campo 'to' ou 'destination').
+    3. Fallback: se só existe 1 tenant com bot ativo, usa ele.
+       Se houver mais de 1, rejeita (não dá pra adivinhar).
+    """
+
+    # Tenta extrair o instance name do payload da Evolution API
+    instance_name = (
+        body.get("instance")
+        or body.get("instanceName")
+        or body.get("data", {}).get("instance")
+        or ""
+    )
+
+    # Tenta achar por phone_number_id = instance_name
+    if instance_name:
+        tenant = db.query(Tenant).filter(
+            Tenant.phone_number_id == instance_name,
+            Tenant.bot_active == True
+        ).first()
+        if tenant:
+            return tenant
+
+    # Tenta pelo número de destino (alguns payloads trazem o número do bot)
+    destination = (
+        body.get("destination")
+        or body.get("to")
+        or body.get("data", {}).get("key", {}).get("remoteJid", "").split("@")[0]
+    )
+
+    # Fallback seguro: só usa .first() se houver exatamente 1 tenant ativo
+    tenants_ativos = db.query(Tenant).filter(Tenant.bot_active == True).all()
+    if len(tenants_ativos) == 1:
+        return tenants_ativos[0]
+
+    # Mais de 1 tenant e não conseguiu identificar — rejeita
+    return None
+
 async def send_whatsapp_message(phone: str, text: str):
+    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
+        print(f"[WhatsApp] Evolution não configurada. Mensagem para {phone}: {text[:50]}...")
+        return
     url = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
     headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     async with httpx.AsyncClient() as client:
-        await client.post(url, json={"number": phone, "text": text}, headers=headers)
+        try:
+            await client.post(url, json={"number": phone, "text": text}, headers=headers)
+        except Exception as e:
+            print(f"[WhatsApp] Erro ao enviar mensagem: {e}")
+
+async def send_whatsapp_message_for_tenant(phone: str, text: str, tenant):
+    """Envia mensagem usando as credenciais do tenant correto."""
+    instance = getattr(tenant, 'phone_number_id', None) or EVOLUTION_INSTANCE
+    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
+        print(f"[WhatsApp:{instance}] Sem Evolution configurada. Msg para {phone}: {text[:50]}...")
+        return
+    url = f"{EVOLUTION_API_URL}/message/sendText/{instance}"
+    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(url, json={"number": phone, "text": text}, headers=headers)
+        except Exception as e:
+            print(f"[WhatsApp:{instance}] Erro ao enviar: {e}")
+
 
 @router.post("/whatsapp/webhook")
 async def whatsapp_webhook(request: Request):
     body = await request.json()
+
     if body.get("event") != "messages.upsert":
         return {"status": "ignored"}
+
     try:
         data = body["data"]
         key = data.get("key", {})
@@ -122,22 +190,27 @@ async def whatsapp_webhook(request: Request):
 
     db = SessionLocal()
     try:
-        tenant = db.query(Tenant).first()
+        # ── Isolamento por tenant ──────────────────────────────────────────
+        tenant = _find_tenant_for_whatsapp(db, body)
         if not tenant:
-            return {"status": "error"}
+            print(f"[WhatsApp] Tenant não identificado para mensagem de {customer_phone}. Body keys: {list(body.keys())}")
+            return {"status": "tenant_not_found"}
 
-        # Verifica se bot está ativo
         if not getattr(tenant, 'bot_active', True):
-            await send_whatsapp_message(customer_phone, "Olá! Estamos temporariamente fora do ar. Por favor, tente mais tarde. 🙏")
+            await send_whatsapp_message_for_tenant(
+                customer_phone,
+                "Olá! Estamos temporariamente fora do ar. Por favor, tente mais tarde. 🙏",
+                tenant
+            )
             return {"status": "bot_inactive"}
 
         tenant_config = get_tenant_config(tenant)
         services = get_tenant_services(db, tenant.id)
-        business_name = tenant_config["bot_business_name"]
-        subject = tenant_config["subject_label"]
 
+        # Cliente sempre vinculado ao tenant correto
         customer = db.query(Customer).filter(
-            Customer.tenant_id == tenant.id, Customer.phone == customer_phone
+            Customer.tenant_id == tenant.id,
+            Customer.phone == customer_phone
         ).first()
         if not customer:
             customer = Customer(tenant_id=tenant.id, phone=customer_phone, name=push_name, wa_id=customer_phone)
@@ -148,8 +221,10 @@ async def whatsapp_webhook(request: Request):
             customer.name = push_name
             db.commit()
 
+        # Conversa sempre vinculada ao tenant correto
         conversation = db.query(Conversation).filter(
-            Conversation.tenant_id == tenant.id, Conversation.customer_phone == customer_phone
+            Conversation.tenant_id == tenant.id,
+            Conversation.customer_phone == customer_phone
         ).first()
         if not conversation:
             conversation = Conversation(tenant_id=tenant.id, customer_phone=customer_phone, messages="[]")
@@ -163,6 +238,7 @@ async def whatsapp_webhook(request: Request):
 
         history = json.loads(conversation.messages)
         customer_context = get_customer_context(db, tenant.id, customer.id, customer.name or push_name)
+
         ai_response = chat_with_ai(
             history, message_text, customer_context,
             tenant_config=tenant_config,
@@ -200,7 +276,6 @@ async def whatsapp_webhook(request: Request):
                 if not service_obj:
                     reply_text = "Serviço não encontrado. Pode escolher outro?"
                 else:
-                    # Salva nome do cliente se a IA coletou
                     customer_name_ai = ai_response.get("customer_name", "")
                     if customer_name_ai and not customer.name:
                         customer.name = customer_name_ai
@@ -216,6 +291,7 @@ async def whatsapp_webhook(request: Request):
                         pickup_time=ai_response.get("pickup_time"),
                     )
                     price_fmt = f"R$ {svc_data['price']/100:.2f}" if svc_data.get('price') else ""
+                    subject = tenant_config.get("subject_label", "Pet")
                     if result["success"]:
                         pet_info = ai_response.get("pet_name", f"seu {subject.lower()}")
                         if ai_response.get("pet_breed"):
@@ -267,9 +343,8 @@ async def whatsapp_webhook(request: Request):
         conversation.messages = json.dumps(history[-20:])
         db.commit()
 
-        await send_whatsapp_message(customer_phone, reply_text)
+        await send_whatsapp_message_for_tenant(customer_phone, reply_text, tenant)
         return {"status": "ok"}
 
     finally:
         db.close()
-        

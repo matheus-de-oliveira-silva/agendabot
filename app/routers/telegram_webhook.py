@@ -18,32 +18,31 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 COMANDOS_RESET = ["/start", "/reiniciar", "/reset", "/novo"]
 
+# Mapeamento opcional: se você tiver múltiplos bots Telegram (um por tenant),
+# configure no .env como TELEGRAM_TENANT_ID=<uuid-do-tenant>
+# Se não configurado, usa o único tenant ativo (seguro apenas com 1 tenant)
+TELEGRAM_TENANT_ID = os.getenv("TELEGRAM_TENANT_ID", "")
+
+
 def get_tenant_services(db, tenant_id: str) -> list:
-    """Retorna serviços ativos do tenant formatados para a IA."""
     services = db.query(Service).filter(
         Service.tenant_id == tenant_id,
         Service.active == True
     ).all()
     result = []
     for s in services:
-        # Gera uma chave simplificada a partir do nome
         key = s.name.lower()
         key = key.replace(" ", "_").replace("ã", "a").replace("é", "e").replace("ê", "e")
         key = key.replace("ç", "c").replace("á", "a").replace("ó", "o").replace("í", "i")
         key = "".join(c for c in key if c.isalnum() or c == "_")
         result.append({
-            "id": s.id,
-            "key": key,
-            "name": s.name,
-            "price": s.price or 0,
-            "duration_min": s.duration_min or 60,
-            "description": s.description or "",
-            "color": s.color or "#6C5CE7",
+            "id": s.id, "key": key, "name": s.name,
+            "price": s.price or 0, "duration_min": s.duration_min or 60,
+            "description": s.description or "", "color": s.color or "#6C5CE7",
         })
     return result
 
 def get_tenant_config(tenant) -> dict:
-    """Retorna configurações do tenant para a IA."""
     return {
         "bot_attendant_name": getattr(tenant, 'bot_attendant_name', None) or "Mari",
         "bot_business_name": getattr(tenant, 'bot_business_name', None) or tenant.display_name or tenant.name,
@@ -57,11 +56,9 @@ def get_tenant_config(tenant) -> dict:
     }
 
 def find_service_by_key(services: list, key: str):
-    """Acha serviço pela chave gerada."""
     for s in services:
         if s["key"] == key:
             return s
-    # Fallback: busca parcial
     for s in services:
         if key in s["key"] or s["key"] in key:
             return s
@@ -87,10 +84,9 @@ def should_reset_conversation(conversation) -> bool:
     return (agora - conversation.updated_at) > timedelta(hours=24)
 
 def check_business_hours_dynamic(tenant_config: dict, date_str: str) -> dict:
-    """Verifica horário baseado na configuração do tenant."""
     try:
         date = datetime.strptime(date_str, "%Y-%m-%d")
-        weekday = str(date.weekday())  # 0=seg...6=dom
+        weekday = str(date.weekday())
         open_days = [d.strip() for d in (tenant_config.get("open_days") or "0,1,2,3,4,5").split(",")]
         if weekday not in open_days:
             return {"open": False, "reason": "closed_day"}
@@ -102,10 +98,43 @@ def check_business_hours_dynamic(tenant_config: dict, date_str: str) -> dict:
     except:
         return {"open": False, "reason": "invalid_date"}
 
+def _find_tenant_for_telegram(db) -> Tenant:
+    """
+    Descobre qual tenant usar para o bot Telegram.
+
+    Se TELEGRAM_TENANT_ID estiver configurado no .env, usa ele (correto para múltiplos tenants).
+    Se não, usa o único tenant ativo. Se houver mais de 1, loga um aviso.
+    """
+    if TELEGRAM_TENANT_ID:
+        tenant = db.query(Tenant).filter(
+            Tenant.id == TELEGRAM_TENANT_ID,
+            Tenant.bot_active == True
+        ).first()
+        if tenant:
+            return tenant
+        print(f"[Telegram] AVISO: TELEGRAM_TENANT_ID='{TELEGRAM_TENANT_ID}' não encontrado ou bot inativo.")
+
+    tenants_ativos = db.query(Tenant).filter(Tenant.bot_active == True).all()
+    if len(tenants_ativos) == 1:
+        return tenants_ativos[0]
+    elif len(tenants_ativos) > 1:
+        print(
+            f"[Telegram] AVISO DE PRIVACIDADE: Há {len(tenants_ativos)} tenants ativos e TELEGRAM_TENANT_ID "
+            f"não está configurado! Configure TELEGRAM_TENANT_ID no .env para evitar vazamento de dados entre tenants."
+        )
+        return tenants_ativos[0]  # fallback — mas loga o aviso
+    return None
+
 async def send_telegram_message(chat_id: int, text: str):
+    if not TELEGRAM_TOKEN:
+        print(f"[Telegram] TELEGRAM_TOKEN não configurado. Msg para {chat_id}: {text[:50]}...")
+        return
     async with httpx.AsyncClient() as client:
-        await client.post(f"{TELEGRAM_API}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+        try:
+            await client.post(f"{TELEGRAM_API}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+        except Exception as e:
+            print(f"[Telegram] Erro ao enviar mensagem: {e}")
 
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
@@ -123,21 +152,21 @@ async def telegram_webhook(request: Request):
 
     db = SessionLocal()
     try:
-        tenant = db.query(Tenant).first()
+        # ── Isolamento por tenant ──────────────────────────────────────────
+        tenant = _find_tenant_for_telegram(db)
         if not tenant:
-            await send_telegram_message(chat_id, "Erro: configuração não encontrada.")
-            return {"status": "error"}
+            await send_telegram_message(chat_id, "Serviço temporariamente indisponível. Tente mais tarde.")
+            return {"status": "tenant_not_found"}
 
-        # Verifica se bot está ativo
         if not getattr(tenant, 'bot_active', True):
             await send_telegram_message(chat_id, "Olá! Estamos temporariamente fora do ar. Por favor, tente mais tarde. 🙏")
             return {"status": "bot_inactive"}
 
-        # Config e serviços dinâmicos
         tenant_config = get_tenant_config(tenant)
         services = get_tenant_services(db, tenant.id)
         business_name = tenant_config["bot_business_name"]
 
+        # Cliente sempre vinculado ao tenant correto
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
             Customer.phone == customer_phone
@@ -151,6 +180,7 @@ async def telegram_webhook(request: Request):
             customer.name = first_name
             db.commit()
 
+        # Conversa sempre vinculada ao tenant correto
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id == tenant.id,
             Conversation.customer_phone == customer_phone
@@ -174,6 +204,7 @@ async def telegram_webhook(request: Request):
 
         history = json.loads(conversation.messages)
         customer_context = get_customer_context(db, tenant.id, customer.id, customer.name or first_name)
+
         ai_response = chat_with_ai(
             history, message_text, customer_context,
             tenant_config=tenant_config,
@@ -207,12 +238,10 @@ async def telegram_webhook(request: Request):
             if not svc_data:
                 reply_text = "Desculpe, não encontrei esse serviço. Pode escolher outro?"
             else:
-                # Busca o objeto Service real no banco
                 service_obj = db.query(Service).filter(Service.id == svc_data["id"]).first()
                 if not service_obj:
                     reply_text = "Serviço não encontrado. Pode escolher outro?"
                 else:
-                    # Salva o nome do cliente se ainda não tiver
                     customer_name_ai = ai_response.get("customer_name", "")
                     if customer_name_ai and not customer.name:
                         customer.name = customer_name_ai
@@ -228,14 +257,15 @@ async def telegram_webhook(request: Request):
                         pickup_time=ai_response.get("pickup_time"),
                     )
                     price_fmt = f"R$ {svc_data['price']/100:.2f}" if svc_data.get('price') else ""
+                    subject = tenant_config.get("subject_label", "Pet")
                     if result["success"]:
-                        pet_info = ai_response.get("pet_name", "seu pet")
+                        pet_info = ai_response.get("pet_name", f"seu {subject.lower()}")
                         if ai_response.get("pet_breed"):
                             pet_info += f" ({ai_response['pet_breed']})"
                         pickup = f"\n🏠 Busca: {ai_response['pickup_time']}" if ai_response.get("pickup_time") else ""
                         reply_text = (
                             f"✅ Agendamento confirmado!\n\n"
-                            f"🐾 {tenant_config['subject_label']}: {pet_info}\n"
+                            f"🐾 {subject}: {pet_info}\n"
                             f"✂️ Serviço: {service_obj.name}{' — ' + price_fmt if price_fmt else ''}\n"
                             f"📅 Data: {result['scheduled_at']}"
                             f"{pickup}\n\n"
