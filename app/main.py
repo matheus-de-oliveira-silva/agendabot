@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from sqlalchemy import text, inspect as sa_inspect
 import asyncio
 
 load_dotenv()
@@ -8,7 +9,51 @@ load_dotenv()
 from .database import engine, Base
 from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook, admin
 
+# Cria tabelas novas (se não existirem)
 Base.metadata.create_all(bind=engine)
+
+# ── Migração automática de colunas ────────────────────────────────────────────
+def _auto_migrate():
+    novas_colunas = {
+        "tenants": [
+            ("bot_attendant_name", "VARCHAR DEFAULT 'Mari'"),
+            ("bot_business_name",  "VARCHAR"),
+            ("open_days",          "VARCHAR DEFAULT '0,1,2,3,4,5'"),
+            ("open_time",          "VARCHAR DEFAULT '09:00'"),
+            ("close_time",         "VARCHAR DEFAULT '18:00'"),
+            ("bot_active",         "BOOLEAN DEFAULT TRUE"),
+        ],
+        "appointments": [
+            ("payment_status",  "VARCHAR DEFAULT 'pending'"),
+            ("payment_method",  "VARCHAR"),
+            ("payment_amount",  "INTEGER"),
+            ("payment_pix_key", "VARCHAR"),
+            ("payment_paid_at", "TIMESTAMP"),
+            ("payment_notes",   "TEXT"),
+        ],
+    }
+    try:
+        inspector = sa_inspect(engine)
+        with engine.connect() as conn:
+            for tabela, cols in novas_colunas.items():
+                try:
+                    existentes = {c["name"] for c in inspector.get_columns(tabela)}
+                except Exception:
+                    existentes = set()
+                for col, tipo in cols:
+                    if col not in existentes:
+                        try:
+                            conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
+                            print(f"[migrate] ✅ {tabela}.{col} adicionado")
+                        except Exception as e:
+                            print(f"[migrate] ⚠️  {tabela}.{col}: {e}")
+            conn.commit()
+        print("[migrate] ✅ Migração concluída.")
+    except Exception as e:
+        print(f"[migrate] ❌ Erro geral na migração: {e}")
+
+_auto_migrate()
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def reminder_loop():
@@ -90,9 +135,9 @@ def setup_tenant(data: dict):
         db.refresh(tenant)
 
         services = [
-            {"name": "Banho simples", "duration_min": 60, "price": 4000},
-            {"name": "Banho e tosa", "duration_min": 90, "price": 7000},
-            {"name": "Tosa higiênica", "duration_min": 45, "price": 3500},
+            {"name": "Banho simples",    "duration_min": 60, "price": 4000},
+            {"name": "Banho e tosa",     "duration_min": 90, "price": 7000},
+            {"name": "Tosa higiênica",   "duration_min": 45, "price": 3500},
         ]
         for s in services:
             service = Service(tenant_id=tenant.id, **s)
@@ -103,13 +148,15 @@ def setup_tenant(data: dict):
     finally:
         db.close()
 
+
 @app.post("/admin/migrate")
-def migrate(db_session=None):
+def migrate_legacy():
+    """Rota legada — mantida por compatibilidade."""
     from .database import engine
     from sqlalchemy import text
     with engine.connect() as conn:
         conn.execute(text("""
-            ALTER TABLE appointments 
+            ALTER TABLE appointments
             ADD COLUMN IF NOT EXISTS pet_id VARCHAR,
             ADD COLUMN IF NOT EXISTS pet_name VARCHAR,
             ADD COLUMN IF NOT EXISTS pet_breed VARCHAR,
@@ -129,7 +176,8 @@ def migrate(db_session=None):
             );
         """))
         conn.commit()
-    return {"success": True, "message": "Migration concluída!"}
+    return {"success": True, "message": "Migration legada concluída!"}
+
 
 @app.post("/admin/rename-tenant")
 def rename_tenant(data: dict):
@@ -145,4 +193,3 @@ def rename_tenant(data: dict):
         return {"success": True, "name": tenant.name}
     finally:
         db.close()
-        
