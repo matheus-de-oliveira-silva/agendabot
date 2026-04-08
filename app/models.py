@@ -6,6 +6,7 @@ import uuid
 def generate_uuid():
     return str(uuid.uuid4())
 
+
 class Tenant(Base):
     __tablename__ = "tenants"
 
@@ -21,9 +22,17 @@ class Tenant(Base):
     dashboard_token = Column(String, nullable=True)     # token de sessão
 
     # Configurações visuais/nome
-    display_name = Column(String, nullable=True)        # nome exibido no dashboard
-    subject_label = Column(String, default="Pet")       # "Pet", "Animal", "Paciente"
+    display_name = Column(String, nullable=True)
+    subject_label = Column(String, default="Pet")
     subject_label_plural = Column(String, default="Pets")
+
+    # ── COLUNAS QUE FALTAVAM (causavam bug no admin) ──
+    bot_attendant_name = Column(String, default="Mari")
+    bot_business_name = Column(String, nullable=True)
+    open_days = Column(String, default="0,1,2,3,4,5")   # dias de funcionamento
+    open_time = Column(String, default="09:00")
+    close_time = Column(String, default="18:00")
+    bot_active = Column(Boolean, default=True)
 
 
 class Customer(Base):
@@ -57,11 +66,10 @@ class Service(Base):
     tenant_id = Column(String, nullable=False)
     name = Column(String, nullable=False)
     duration_min = Column(Integer, default=60)
-    price = Column(Integer, default=0)         # em centavos (ex: 7000 = R$70,00)
+    price = Column(Integer, default=0)     # em centavos (ex: 7000 = R$70,00)
     active = Column(Boolean, default=True)
-    # Campos novos
-    description = Column(String, nullable=True)  # descrição curta p/ o bot
-    color = Column(String, default="#6C5CE7")     # cor no dashboard
+    description = Column(String, nullable=True)
+    color = Column(String, default="#6C5CE7")
 
 
 class Appointment(Base):
@@ -80,6 +88,14 @@ class Appointment(Base):
     status = Column(String, default="confirmed")
     notes = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
+
+    # ── PAGAMENTO ──
+    payment_status = Column(String, default="pending")   # pending | paid | waived
+    payment_method = Column(String, nullable=True)       # pix | dinheiro | cartao | outro
+    payment_amount = Column(Integer, nullable=True)      # valor pago em centavos (pode diferir do serviço)
+    payment_pix_key = Column(String, nullable=True)      # chave pix do comprovante
+    payment_paid_at = Column(DateTime, nullable=True)    # quando foi marcado como pago
+    payment_notes = Column(Text, nullable=True)          # observações sobre o pagamento
 
 
 class Conversation(Base):
