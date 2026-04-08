@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Appointment, Customer, Service, Tenant
+from ..models import Appointment, Customer, Service, Tenant, Conversation
 from datetime import datetime
 import pytz, os, bcrypt, secrets
 
@@ -23,6 +23,16 @@ def check_admin(request: Request):
     token = request.cookies.get("admin_token") or request.headers.get("X-Admin-Token")
     return token == ADMIN_SECRET
 
+def get_base_url(request: Request) -> str:
+    """Retorna sempre HTTPS em produção, HTTP só em localhost."""
+    host = request.headers.get("host", "")
+    proto = request.headers.get("x-forwarded-proto", "")
+    if proto:
+        return f"{proto}://{host}"
+    if "localhost" in host or "127.0.0.1" in host:
+        return f"http://{host}"
+    return f"https://{host}"
+
 ADMIN_STYLE = """
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
@@ -41,7 +51,7 @@ input,select,textarea{width:100%;padding:10px 12px;border:1px solid #2d3148;bord
 input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
 .btn{padding:9px 18px;border-radius:10px;border:none;cursor:pointer;font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;transition:all .15s}
 .btn-primary{background:#5B5BD6;color:#fff}.btn-primary:hover{background:#7c7de8}
-.btn-danger{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}.btn-danger:hover{background:#3d1c1c}
+.btn-danger{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}.btn-danger:hover{background:#c62828;color:#fff}
 .btn-success{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}.btn-success:hover{background:#243d24}
 .btn-sm{padding:5px 12px;font-size:12px;border-radius:8px}
 .btn-outline{background:transparent;color:#9aa0b8;border:1px solid #2d3148}.btn-outline:hover{border-color:#7c7de8;color:#7c7de8}
@@ -80,6 +90,8 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .stat-mini{background:#0f1117;border:1px solid #2d3148;border-radius:10px;padding:12px 16px;text-align:center}
 .stat-mini-num{font-size:24px;font-weight:800;color:#7c7de8}
 .stat-mini-label{font-size:11px;color:#9aa0b8;margin-top:2px}
+.danger-zone{background:#1a0a0a;border:1px solid rgba(252,129,129,.2);border-radius:12px;padding:18px;margin-top:20px}
+.danger-title{font-size:13px;font-weight:700;color:#fc8181;margin-bottom:12px;display:flex;align-items:center;gap:6px}
 @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}}
 </style>
 """
@@ -127,6 +139,7 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
     if not check_admin(request):
         return RedirectResponse("/admin/login", status_code=302)
 
+    base_url = get_base_url(request)
     tenants = db.query(Tenant).order_by(Tenant.created_at.desc()).all()
     rows = ""
     for t in tenants:
@@ -137,6 +150,7 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
         badge_pw = "badge-green" if t.dashboard_password else "badge-gray"
         bot_status = "badge-green" if getattr(t, 'bot_active', True) else "badge-red"
         bot_label = "🤖 Bot ativo" if getattr(t, 'bot_active', True) else "🤖 Bot pausado"
+        dash_url = f"{base_url}/dashboard?tid={t.id}"
         rows += f"""
         <div class="tenant-row">
             <div style="flex:1">
@@ -146,7 +160,11 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
             <span class="tenant-type">{tipo}</span>
             <span class="badge {bot_status}">{bot_label}</span>
             <span class="badge {badge_pw}">{has_pw}</span>
+            <a href="{dash_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Painel</a>
             <a href="/admin/tenant/{t.id}" class="btn btn-outline btn-sm">⚙️ Configurar</a>
+            <form method="POST" action="/admin/tenant/{t.id}/delete" onsubmit="return confirm('⚠️ DELETAR {t.display_name or t.name}?\\n\\nIsso vai apagar TODOS os agendamentos, clientes e dados. Não tem volta!')">
+                <button type="submit" class="btn btn-danger btn-sm">🗑️ Deletar</button>
+            </form>
         </div>"""
 
     if not rows:
@@ -260,6 +278,26 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant.id}?created=1", status_code=302)
 
+# ── DELETAR TENANT (com todos os dados) ───────────────────────────────────────
+@router.post("/admin/tenant/{tenant_id}/delete")
+def delete_tenant(tenant_id: str, request: Request, db: Session = Depends(get_db)):
+    if not check_admin(request):
+        return RedirectResponse("/admin/login", status_code=302)
+
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        return RedirectResponse("/admin", status_code=302)
+
+    # Deleta tudo relacionado ao tenant (ordem importa por integridade)
+    db.query(Appointment).filter(Appointment.tenant_id == tenant_id).delete()
+    db.query(Customer).filter(Customer.tenant_id == tenant_id).delete()
+    db.query(Service).filter(Service.tenant_id == tenant_id).delete()
+    db.query(Conversation).filter(Conversation.tenant_id == tenant_id).delete()
+    db.delete(tenant)
+    db.commit()
+
+    return RedirectResponse("/admin?deleted=1", status_code=302)
+
 def _default_services(business_type, tenant_id):
     defaults = {
         "petshop": [
@@ -298,23 +336,23 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
 
     services = db.query(Service).filter(Service.tenant_id == tenant_id).order_by(Service.active.desc(), Service.name).all()
     created = request.query_params.get("created") == "1"
-    saved = request.query_params.get("saved") == "1"
+    saved   = request.query_params.get("saved") == "1"
     alert = ""
-    if created: alert = '<div class="alert alert-success">✅ Cliente criado!</div>'
-    if saved: alert = '<div class="alert alert-success">✅ Salvo com sucesso!</div>'
+    if created: alert = '<div class="alert alert-success">✅ Cliente criado com sucesso!</div>'
+    if saved:   alert = '<div class="alert alert-success">✅ Salvo com sucesso!</div>'
 
-    dashboard_url = f"{request.base_url}dashboard?tid={tenant_id}"
+    # ── URL correta sempre com HTTPS em produção ──
+    base_url = get_base_url(request)
+    dashboard_url = f"{base_url}/dashboard?tid={tenant_id}"
     tipo = BUSINESS_TYPES.get(tenant.business_type, tenant.business_type)
 
-    # Stats rápidos
-    total_appts = db.query(Appointment).filter(Appointment.tenant_id == tenant_id).count()
+    total_appts   = db.query(Appointment).filter(Appointment.tenant_id == tenant_id).count()
     total_clients = db.query(Customer).filter(Customer.tenant_id == tenant_id).count()
-    active_appts = db.query(Appointment).filter(
+    active_appts  = db.query(Appointment).filter(
         Appointment.tenant_id == tenant_id,
         Appointment.status.in_(["confirmed", "in_progress"])
     ).count()
 
-    # Serviços
     svc_rows = ""
     for s in services:
         status_badge = '<span class="badge badge-green">Ativo</span>' if s.active else '<span class="badge badge-gray">Inativo</span>'
@@ -336,20 +374,18 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
                 <button type="submit" class="btn btn-outline btn-sm">{'⏸' if s.active else '▶'}</button>
             </form>
             <form method="POST" action="/admin/tenant/{tenant_id}/service/{s.id}/delete">
-                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Remover?')">✕</button>
+                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Remover serviço?')">✕</button>
             </form>
         </div>"""
 
     if not svc_rows:
         svc_rows = '<div style="color:#9aa0b8;text-align:center;padding:16px">Nenhum serviço.</div>'
 
-    # Dias de funcionamento
     open_days_list = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
     days_btns = ''.join(
         f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" data-day="{i}" onclick="toggleDay(this,\'edit\')">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
-
     bot_checked = 'checked' if getattr(tenant, 'bot_active', True) else ''
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
@@ -362,24 +398,24 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
 <a href="/admin" class="back">← Voltar</a>
 {alert}
 
-<!-- Stats rápidos -->
 <div class="grid3" style="margin-bottom:20px">
     <div class="stat-mini"><div class="stat-mini-num">{total_appts}</div><div class="stat-mini-label">Total agendamentos</div></div>
     <div class="stat-mini"><div class="stat-mini-num">{total_clients}</div><div class="stat-mini-label">Clientes</div></div>
     <div class="stat-mini"><div class="stat-mini-num">{active_appts}</div><div class="stat-mini-label">Em aberto</div></div>
 </div>
 
-<!-- Link dashboard -->
 <div class="card">
     <div class="card-title">🔗 Acesso do cliente <span class="tag">{tipo}</span></div>
     <div class="link-box">
-        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel (envie para o cliente)</div>
-        <div class="link-url">{dashboard_url}</div>
+        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel — envie este link para o cliente</div>
+        <div class="link-url" id="dash-url">{dashboard_url}</div>
     </div>
-    <button onclick="navigator.clipboard.writeText('{dashboard_url}');this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar link',2000)" class="btn btn-outline btn-sm">📋 Copiar link</button>
+    <div style="display:flex;gap:8px">
+        <button onclick="navigator.clipboard.writeText(document.getElementById('dash-url').textContent);this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar link',2000)" class="btn btn-outline btn-sm">📋 Copiar link</button>
+        <a href="{dashboard_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Abrir painel</a>
+    </div>
 </div>
 
-<!-- Config geral -->
 <div class="card">
     <div class="card-title">🏢 Configurações do negócio</div>
     <form method="POST" action="/admin/tenant/{tenant_id}/config">
@@ -430,7 +466,6 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </form>
 </div>
 
-<!-- Senha -->
 <div class="card">
     <div class="card-title">🔑 Senha do dashboard</div>
     <form method="POST" action="/admin/tenant/{tenant_id}/password">
@@ -442,7 +477,6 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </form>
 </div>
 
-<!-- Serviços -->
 <div class="card">
     <div class="card-title">✂️ Serviços ({len(services)})</div>
     {svc_rows}
@@ -467,6 +501,18 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </form>
 </div>
 
+<!-- Zona de perigo -->
+<div class="danger-zone">
+    <div class="danger-title">⚠️ Zona de Perigo</div>
+    <p style="font-size:13px;color:#9aa0b8;margin-bottom:14px">
+        Deletar este cliente remove permanentemente todos os agendamentos, clientes e dados associados. Esta ação não pode ser desfeita.
+    </p>
+    <form method="POST" action="/admin/tenant/{tenant_id}/delete"
+          onsubmit="return confirm('⚠️ DELETAR {tenant.display_name or tenant.name}?\\n\\nTodos os dados serão apagados permanentemente. Não tem volta!')">
+        <button type="submit" class="btn btn-danger">🗑️ Deletar este cliente permanentemente</button>
+    </form>
+</div>
+
 </div>
 <script>
 function toggleDay(btn, suffix) {{
@@ -485,17 +531,17 @@ async def save_config(tenant_id: str, request: Request, db: Session = Depends(ge
     form = await request.form()
     t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
-    t.display_name = form.get("display_name", t.display_name)
-    t.business_type = form.get("business_type", t.business_type)
-    t.subject_label = form.get("subject_label", t.subject_label)
+    t.display_name        = form.get("display_name", t.display_name)
+    t.business_type       = form.get("business_type", t.business_type)
+    t.subject_label       = form.get("subject_label", t.subject_label)
     t.subject_label_plural = form.get("subject_label_plural", t.subject_label_plural)
-    t.bot_attendant_name = form.get("bot_attendant_name", getattr(t, 'bot_attendant_name', 'Mari'))
-    t.phone_number_id = form.get("phone_number_id") or t.phone_number_id
-    t.wa_access_token = form.get("wa_access_token") or t.wa_access_token
-    t.open_time = form.get("open_time", getattr(t, 'open_time', '09:00'))
-    t.close_time = form.get("close_time", getattr(t, 'close_time', '18:00'))
-    t.open_days = form.get("open_days", getattr(t, 'open_days', '0,1,2,3,4,5'))
-    t.bot_active = form.get("bot_active") == "1"
+    t.bot_attendant_name  = form.get("bot_attendant_name", getattr(t, 'bot_attendant_name', 'Mari'))
+    t.phone_number_id     = form.get("phone_number_id") or t.phone_number_id
+    t.wa_access_token     = form.get("wa_access_token") or t.wa_access_token
+    t.open_time           = form.get("open_time", getattr(t, 'open_time', '09:00'))
+    t.close_time          = form.get("close_time", getattr(t, 'close_time', '18:00'))
+    t.open_days           = form.get("open_days", getattr(t, 'open_days', '0,1,2,3,4,5'))
+    t.bot_active          = form.get("bot_active") == "1"
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 

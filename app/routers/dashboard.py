@@ -288,6 +288,14 @@ def delete_service_api(service_id: str, request: Request, db: Session = Depends(
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, tid: str = "", tab: str = "hoje", db: Session = Depends(get_db)):
     tenant = get_tenant_from_request(request, db)
+
+    # Se tem tid na URL e é diferente do tenant logado → força novo login
+    # Isso resolve o bug de todos os clientes irem para a mesma agenda
+    if tid and tenant and tenant.id != tid:
+        resp = RedirectResponse(f"/dashboard/login?tid={tid}", status_code=302)
+        resp.delete_cookie("dash_session")  # limpa cookie do tenant anterior
+        return resp
+
     if not tenant:
         if tid:
             return RedirectResponse(f"/dashboard/login?tid={tid}", status_code=302)
