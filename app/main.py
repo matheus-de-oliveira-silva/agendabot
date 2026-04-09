@@ -9,10 +9,9 @@ load_dotenv()
 from .database import engine, Base
 from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook, admin
 
-# Cria tabelas novas (se não existirem)
 Base.metadata.create_all(bind=engine)
 
-# ── Migração automática de colunas ────────────────────────────────────────────
+# ── Migração v1+v2 ────────────────────────────────────────────────────────────
 def _auto_migrate():
     novas_colunas = {
         "tenants": [
@@ -44,38 +43,59 @@ def _auto_migrate():
                     if col not in existentes:
                         try:
                             conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
-                            print(f"[migrate] ✅ {tabela}.{col} adicionado")
+                            print(f"[migrate] ok {tabela}.{col}")
                         except Exception as e:
-                            print(f"[migrate] ⚠️  {tabela}.{col}: {e}")
+                            print(f"[migrate] skip {tabela}.{col}: {e}")
             conn.commit()
-        print("[migrate] ✅ Migração concluída.")
+        print("[migrate] v1+v2 concluida.")
     except Exception as e:
-        print(f"[migrate] ❌ Erro geral na migração: {e}")
+        print(f"[migrate] erro: {e}")
 
 _auto_migrate()
-@app.post("/admin/migrate-v3")
-def migrate_v3_http(request: Request):
-    from .database import engine
-    from migrate_v3 import run_migration
-    results = run_migration(engine)
-    return {"results": results}
+
+# ── Migração v3: icone, owner_phone, blocked_slots ────────────────────────────
+def _auto_migrate_v3():
+    try:
+        inspector = sa_inspect(engine)
+        with engine.connect() as conn:
+            try:
+                existentes = {c["name"] for c in inspector.get_columns("tenants")}
+            except Exception:
+                existentes = set()
+            for col, tipo in [("tenant_icon","VARCHAR DEFAULT '🐾'"),("owner_phone","VARCHAR"),("notify_new_appt","BOOLEAN DEFAULT TRUE")]:
+                if col not in existentes:
+                    try:
+                        conn.execute(text(f"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS {col} {tipo}"))
+                        print(f"[migrate-v3] ok tenants.{col}")
+                    except Exception as e:
+                        print(f"[migrate-v3] skip tenants.{col}: {e}")
+            try:
+                conn.execute(text("""CREATE TABLE IF NOT EXISTS blocked_slots (
+                    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL,
+                    date VARCHAR NOT NULL, time VARCHAR, reason VARCHAR,
+                    created_at TIMESTAMP DEFAULT NOW())"""))
+                print("[migrate-v3] blocked_slots ok")
+            except Exception as e:
+                print(f"[migrate-v3] blocked_slots: {e}")
+            conn.commit()
+        print("[migrate-v3] v3 concluida.")
+    except Exception as e:
+        print(f"[migrate-v3] erro: {e}")
+
+_auto_migrate_v3()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 async def reminder_loop():
     from .services.reminder import send_daily_reminders
     from datetime import datetime
-
     while True:
         agora = datetime.now()
         target = agora.replace(hour=18, minute=0, second=0, microsecond=0)
-
         if agora >= target:
             target = target.replace(day=target.day + 1)
-
         segundos = (target - agora).total_seconds()
-        print(f"[Lembretes] Próximo envio em {int(segundos/3600)}h {int((segundos%3600)/60)}min")
-
+        print(f"[Lembretes] Proximo envio em {int(segundos/3600)}h {int((segundos%3600)/60)}min")
         await asyncio.sleep(segundos)
         await send_daily_reminders()
 
@@ -89,7 +109,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AgendaBot API",
-    description="Chatbot de agendamento para negócios locais",
+    description="Chatbot de agendamento para negocios locais",
     version="0.1.0",
     lifespan=lifespan
 )
@@ -106,11 +126,9 @@ app.include_router(admin.router)
 def root():
     return {"status": "ok", "message": "AgendaBot rodando!"}
 
-
 @app.get("/health")
 def health():
     return {"status": "healthy"}
-
 
 @app.post("/test/reminders")
 async def test_reminders():
@@ -118,18 +136,15 @@ async def test_reminders():
     await send_daily_reminders()
     return {"status": "ok", "message": "Lembretes enviados!"}
 
-
 @app.post("/setup/tenant")
 def setup_tenant(data: dict):
     from .database import SessionLocal
     from .models import Tenant, Service
-
     db = SessionLocal()
     try:
         existing = db.query(Tenant).filter(Tenant.name == data["name"]).first()
         if existing:
-            return {"tenant_id": existing.id, "message": "já existe"}
-
+            return {"tenant_id": existing.id, "message": "ja existe"}
         tenant = Tenant(
             name=data["name"],
             business_type=data.get("business_type", "petshop"),
@@ -139,51 +154,20 @@ def setup_tenant(data: dict):
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
-
-        services = [
-            {"name": "Banho simples",    "duration_min": 60, "price": 4000},
-            {"name": "Banho e tosa",     "duration_min": 90, "price": 7000},
-            {"name": "Tosa higiênica",   "duration_min": 45, "price": 3500},
-        ]
-        for s in services:
-            service = Service(tenant_id=tenant.id, **s)
-            db.add(service)
+        for s in [{"name":"Banho simples","duration_min":60,"price":4000},{"name":"Banho e tosa","duration_min":90,"price":7000},{"name":"Tosa higienica","duration_min":45,"price":3500}]:
+            db.add(Service(tenant_id=tenant.id, **s))
         db.commit()
-
         return {"tenant_id": tenant.id, "message": "criado com sucesso"}
     finally:
         db.close()
 
-
 @app.post("/admin/migrate")
 def migrate_legacy():
-    """Rota legada — mantida por compatibilidade."""
-    from .database import engine
-    from sqlalchemy import text
     with engine.connect() as conn:
-        conn.execute(text("""
-            ALTER TABLE appointments
-            ADD COLUMN IF NOT EXISTS pet_id VARCHAR,
-            ADD COLUMN IF NOT EXISTS pet_name VARCHAR,
-            ADD COLUMN IF NOT EXISTS pet_breed VARCHAR,
-            ADD COLUMN IF NOT EXISTS pet_weight FLOAT,
-            ADD COLUMN IF NOT EXISTS pickup_time VARCHAR;
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS pets (
-                id VARCHAR PRIMARY KEY,
-                tenant_id VARCHAR NOT NULL,
-                customer_id VARCHAR NOT NULL,
-                name VARCHAR NOT NULL,
-                breed VARCHAR,
-                weight FLOAT,
-                notes TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-        """))
+        conn.execute(text("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS pet_id VARCHAR, ADD COLUMN IF NOT EXISTS pet_name VARCHAR, ADD COLUMN IF NOT EXISTS pet_breed VARCHAR, ADD COLUMN IF NOT EXISTS pet_weight FLOAT, ADD COLUMN IF NOT EXISTS pickup_time VARCHAR;"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS pets (id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, customer_id VARCHAR NOT NULL, name VARCHAR NOT NULL, breed VARCHAR, weight FLOAT, notes TEXT, created_at TIMESTAMP DEFAULT NOW());"))
         conn.commit()
-    return {"success": True, "message": "Migration legada concluída!"}
-
+    return {"success": True}
 
 @app.post("/admin/rename-tenant")
 def rename_tenant(data: dict):
@@ -191,11 +175,9 @@ def rename_tenant(data: dict):
     from .models import Tenant
     db = SessionLocal()
     try:
-        tenant = db.query(Tenant).first()
-        if not tenant:
-            return {"error": "Tenant não encontrado"}
-        tenant.name = data["name"]
-        db.commit()
-        return {"success": True, "name": tenant.name}
+        t = db.query(Tenant).first()
+        if not t: return {"error": "nao encontrado"}
+        t.name = data["name"]; db.commit()
+        return {"success": True, "name": t.name}
     finally:
         db.close()
