@@ -99,16 +99,28 @@ def dash_logout(tid: str = ""):
 
 # ── APIs ──────────────────────────────────────────────────────────────────────
 @router.post("/api/appointment/{appointment_id}/status")
-def update_status(appointment_id: str, request_data: dict, db: Session = Depends(get_db)):
-    a = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+def update_status(appointment_id: str, request_data: dict, request: Request, db: Session = Depends(get_db)):
+    tenant = get_tenant_from_request(request, db)
+    if not tenant:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    a = db.query(Appointment).filter(
+        Appointment.id == appointment_id,
+        Appointment.tenant_id == tenant.id    # ← garante que pertence ao tenant
+    ).first()
     if not a: return JSONResponse({"error": "Não encontrado"}, status_code=404)
     a.status = request_data.get("status", a.status)
     db.commit()
     return {"success": True}
 
 @router.get("/api/appointment/{appointment_id}/cancel")
-def cancel_appt(appointment_id: str, db: Session = Depends(get_db)):
-    a = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+def cancel_appt(appointment_id: str, request: Request, db: Session = Depends(get_db)):
+    tenant = get_tenant_from_request(request, db)
+    if not tenant:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    a = db.query(Appointment).filter(
+        Appointment.id == appointment_id,
+        Appointment.tenant_id == tenant.id    # ← garante que pertence ao tenant
+    ).first()
     if not a: return JSONResponse({"error": "Não encontrado"}, status_code=404)
     a.status = "cancelled"
     db.commit()
