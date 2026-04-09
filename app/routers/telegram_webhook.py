@@ -9,6 +9,7 @@ from ..services.scheduler import (
     cancel_appointment, get_customer_appointments, FERIADOS
 )
 import os, json, httpx
+from ..services.notifier import notify_owner_new_appointment
 from datetime import datetime, timedelta
 import pytz
 
@@ -271,6 +272,10 @@ async def telegram_webhook(request: Request):
                             f"{pickup}\n\n"
                             f"Até lá! 😊"
                         )
+                        # Notifica o dono do negócio
+                        appt_obj = db.query(Appointment).filter(Appointment.id == result["appointment_id"]).first()
+                        if appt_obj:
+                            await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
                     else:
                         reply_text = f"😕 Não consegui confirmar ({result['error']}). Vamos tentar outro horário?"
 
@@ -314,4 +319,3 @@ async def telegram_webhook(request: Request):
 
     finally:
         db.close()
-        

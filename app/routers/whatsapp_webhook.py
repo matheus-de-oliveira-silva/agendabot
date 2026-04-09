@@ -9,6 +9,7 @@ from ..services.scheduler import (
     get_customer_appointments, FERIADOS
 )
 import os, json, httpx
+from ..services.notifier import notify_owner_new_appointment
 from datetime import datetime, timedelta
 import pytz
 
@@ -305,6 +306,10 @@ async def whatsapp_webhook(request: Request):
                             f"{pickup}\n\n"
                             f"Até lá! Qualquer dúvida é só chamar. 😊"
                         )
+                        # Notifica o dono do negócio
+                        appt_obj = db.query(Appointment).filter(Appointment.id == result["appointment_id"]).first()
+                        if appt_obj:
+                            await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
                     else:
                         reply_text = f"😕 Não consegui confirmar esse horário ({result['error']}). Vamos tentar outro?"
 

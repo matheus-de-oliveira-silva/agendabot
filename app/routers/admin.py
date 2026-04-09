@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Appointment, Customer, Service, Tenant, Conversation
+from ..models import Appointment, Customer, Service, Tenant, Conversation, BlockedSlot
 from datetime import datetime
 import pytz, os, bcrypt, secrets
 
@@ -14,7 +14,21 @@ BUSINESS_TYPES = {
     "petshop": "🐾 Pet Shop",
     "clinica": "🏥 Clínica Veterinária",
     "adocao": "🐶 Clínica de Adoção",
+    "barbearia": "💈 Barbearia",
+    "salao": "💅 Salão de Beleza",
+    "estetica": "✨ Estética",
     "outro": "⚙️ Outro",
+}
+
+# Ícones disponíveis por tipo de negócio (sugestões)
+ICON_SUGGESTIONS = {
+    "petshop":   ["🐾", "🐶", "🐱", "🐕", "✂️"],
+    "clinica":   ["🏥", "🩺", "💉", "🐾", "⚕️"],
+    "adocao":    ["🐶", "🏡", "❤️", "🐱", "🐾"],
+    "barbearia": ["💈", "✂️", "🪒", "👨", "💇"],
+    "salao":     ["💅", "💆", "✨", "💄", "👩"],
+    "estetica":  ["✨", "💆", "🌸", "💎", "🌿"],
+    "outro":     ["⚙️", "📅", "🏢", "⭐", "🎯"],
 }
 
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
@@ -24,7 +38,6 @@ def check_admin(request: Request):
     return token == ADMIN_SECRET
 
 def get_base_url(request: Request) -> str:
-    """Retorna sempre HTTPS em produção, HTTP só em localhost."""
     host = request.headers.get("host", "")
     proto = request.headers.get("x-forwarded-proto", "")
     if proto:
@@ -57,6 +70,7 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .btn-outline{background:transparent;color:#9aa0b8;border:1px solid #2d3148}.btn-outline:hover{border-color:#7c7de8;color:#7c7de8}
 .tenant-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid #2d3148;border-radius:12px;margin-bottom:10px;background:#22263a;transition:border-color .2s}
 .tenant-row:hover{border-color:#7c7de8}
+.tenant-icon{font-size:24px;width:40px;text-align:center}
 .tenant-name{font-weight:700;font-size:15px;flex:1}
 .tenant-type{font-size:12px;color:#9aa0b8;background:#1a1d27;padding:3px 10px;border-radius:20px}
 .badge{font-size:11px;padding:3px 8px;border-radius:10px;font-weight:600}
@@ -64,9 +78,6 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .badge-red{background:#2d1515;color:#fc8181}
 .badge-gray{background:#22263a;color:#9aa0b8}
 .service-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117}
-.service-color-dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
-.service-name{font-weight:600;font-size:14px;flex:1}
-.service-meta{font-size:12px;color:#9aa0b8}
 .form-group{margin-bottom:14px}
 .divider{height:1px;background:#2d3148;margin:20px 0}
 .alert{padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px}
@@ -79,6 +90,10 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .days-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .day-btn{padding:6px 12px;border-radius:8px;border:1px solid #2d3148;background:#0f1117;color:#9aa0b8;cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif;transition:all .15s}
 .day-btn.active{background:#23254a;border-color:#7c7de8;color:#7c7de8}
+.icon-picker{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.icon-opt{width:42px;height:42px;border-radius:10px;border:2px solid #2d3148;background:#0f1117;cursor:pointer;font-size:22px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.icon-opt:hover{border-color:#7c7de8;background:#23254a}
+.icon-opt.selected{border-color:#7c7de8;background:#23254a;box-shadow:0 0 0 3px #23254a}
 .toggle-switch{position:relative;display:inline-flex;align-items:center;gap:10px;cursor:pointer}
 .toggle-switch input{opacity:0;width:0;height:0}
 .slider{width:44px;height:24px;background:#2d3148;border-radius:12px;position:relative;transition:background .2s}
@@ -92,6 +107,20 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .stat-mini-label{font-size:11px;color:#9aa0b8;margin-top:2px}
 .danger-zone{background:#1a0a0a;border:1px solid rgba(252,129,129,.2);border-radius:12px;padding:18px;margin-top:20px}
 .danger-title{font-size:13px;font-weight:700;color:#fc8181;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+/* Tutorial WhatsApp */
+.tutorial-step{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid #2d3148}
+.tutorial-step:last-child{border-bottom:none}
+.step-num{width:28px;height:28px;border-radius:50%;background:#23254a;color:#7c7de8;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.step-text{font-size:13px;color:#9aa0b8;line-height:1.6}
+.step-text strong{color:#e8eaf2}
+.step-text a{color:#7c7de8;text-decoration:none}
+.step-text a:hover{text-decoration:underline}
+.code-box{background:#0f1117;border:1px solid #2d3148;border-radius:8px;padding:8px 12px;font-family:'DM Mono',monospace;font-size:12px;color:#a29bfe;margin-top:6px;word-break:break-all}
+/* Bloqueio de horários */
+.blocked-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117}
+.blocked-date{font-weight:700;font-size:13px;min-width:90px}
+.blocked-time{font-size:12px;color:#9aa0b8;flex:1}
+.blocked-reason{font-size:12px;color:#7c7de8}
 @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}}
 </style>
 """
@@ -115,8 +144,7 @@ def admin_login_page(error=""):
 </form></div></div></div></body></html>""")
 
 @router.get("/admin/login", response_class=HTMLResponse)
-def login_page():
-    return admin_login_page()
+def login_page(): return admin_login_page()
 
 @router.post("/admin/login")
 async def do_login(request: Request):
@@ -136,23 +164,25 @@ def do_logout():
 
 @router.get("/admin", response_class=HTMLResponse)
 def admin_home(request: Request, db: Session = Depends(get_db)):
-    if not check_admin(request):
-        return RedirectResponse("/admin/login", status_code=302)
-
+    if not check_admin(request): return RedirectResponse("/admin/login", status_code=302)
     base_url = get_base_url(request)
+    deleted = request.query_params.get("deleted") == "1"
+    alert = '<div class="alert alert-success" style="margin-bottom:16px">✅ Cliente deletado.</div>' if deleted else ""
     tenants = db.query(Tenant).order_by(Tenant.created_at.desc()).all()
     rows = ""
     for t in tenants:
         count = db.query(Appointment).filter(Appointment.tenant_id == t.id).count()
         clientes = db.query(Customer).filter(Customer.tenant_id == t.id).count()
         tipo = BUSINESS_TYPES.get(t.business_type, t.business_type)
-        has_pw = "✅ Com senha" if t.dashboard_password else "⚠️ Sem senha"
         badge_pw = "badge-green" if t.dashboard_password else "badge-gray"
+        has_pw = "✅ Senha" if t.dashboard_password else "⚠️ Sem senha"
         bot_status = "badge-green" if getattr(t, 'bot_active', True) else "badge-red"
-        bot_label = "🤖 Bot ativo" if getattr(t, 'bot_active', True) else "🤖 Bot pausado"
+        bot_label = "🤖 Ativo" if getattr(t, 'bot_active', True) else "🤖 Pausado"
+        icon = getattr(t, 'tenant_icon', '🐾') or '🐾'
         dash_url = f"{base_url}/dashboard?tid={t.id}"
         rows += f"""
         <div class="tenant-row">
+            <div class="tenant-icon">{icon}</div>
             <div style="flex:1">
                 <div class="tenant-name">{t.display_name or t.name}</div>
                 <div style="font-size:12px;color:#9aa0b8;margin-top:2px">{count} agendamentos · {clientes} clientes</div>
@@ -161,23 +191,26 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
             <span class="badge {bot_status}">{bot_label}</span>
             <span class="badge {badge_pw}">{has_pw}</span>
             <a href="{dash_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Painel</a>
-            <a href="/admin/tenant/{t.id}" class="btn btn-outline btn-sm">⚙️ Configurar</a>
-            <form method="POST" action="/admin/tenant/{t.id}/delete" onsubmit="return confirm('⚠️ DELETAR {t.display_name or t.name}?\\n\\nIsso vai apagar TODOS os agendamentos, clientes e dados. Não tem volta!')">
-                <button type="submit" class="btn btn-danger btn-sm">🗑️ Deletar</button>
+            <a href="/admin/tenant/{t.id}" class="btn btn-outline btn-sm">⚙️ Config</a>
+            <form method="POST" action="/admin/tenant/{t.id}/delete" onsubmit="return confirm('⚠️ DELETAR {t.display_name or t.name}?\\n\\nApaga TODOS os dados. Sem volta!')">
+                <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
             </form>
         </div>"""
-
     if not rows:
         rows = '<div style="color:#9aa0b8;text-align:center;padding:24px">Nenhum cliente ainda.</div>'
 
+    # Ícones iniciais para o form de novo cliente
+    icon_opts_new = ''.join(
+        f'<div class="icon-opt {"selected" if i==0 else ""}" data-icon="{ico}" onclick="selectIcon(this,\'new\')">{ico}</div>'
+        for i, ico in enumerate(["🐾","💈","💅","✨","🏥","🐶","⚙️","📅"])
+    )
+
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>Admin — Painel</title>{ADMIN_STYLE}</head><body>
-<div class="header">
-    <div class="logo">⚙️ Admin Panel</div>
-    <a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a>
-</div>
+<div class="header"><div class="logo">⚙️ Admin Panel</div>
+<a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a></div>
 <div class="container">
-
+{alert}
 <div class="card">
     <div class="card-title">🏢 Clientes ({len(tenants)})</div>
     {rows}
@@ -188,19 +221,21 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
     <form method="POST" action="/admin/tenant">
     <div class="grid2">
         <div class="form-group"><label>Nome do negócio *</label>
-        <input name="name" placeholder="Ex: PetShop Amigo Fiel" required></div>
+        <input name="name" placeholder="Ex: Barbearia do João" required></div>
         <div class="form-group"><label>Tipo *</label>
-        <select name="business_type">
-            <option value="petshop">🐾 Pet Shop</option>
-            <option value="clinica">🏥 Clínica Veterinária</option>
-            <option value="adocao">🐶 Clínica de Adoção</option>
-            <option value="outro">⚙️ Outro</option>
+        <select name="business_type" onchange="updateIcons(this.value,'new')">
+            {''.join(f'<option value="{k}">{v}</option>' for k,v in BUSINESS_TYPES.items())}
         </select></div>
+    </div>
+    <div class="form-group">
+        <label>Ícone do painel</label>
+        <div class="icon-picker" id="icons-new">{icon_opts_new}</div>
+        <input type="hidden" name="tenant_icon" id="icon_val_new" value="🐾">
     </div>
     <div class="grid2">
         <div class="form-group"><label>Nome da atendente virtual</label>
         <input name="bot_attendant_name" placeholder="Mari" value="Mari"></div>
-        <div class="form-group"><label>Nome do "sujeito" (singular/plural)</label>
+        <div class="form-group"><label>Sujeito (singular / plural)</label>
         <div style="display:flex;gap:8px">
         <input name="subject_label" placeholder="Pet" value="Pet">
         <input name="subject_label_plural" placeholder="Pets" value="Pets">
@@ -212,6 +247,8 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
         <div class="form-group"><label>WA Access Token</label>
         <input name="wa_access_token" placeholder="Token da API"></div>
     </div>
+    <div class="form-group"><label>WhatsApp do dono (para receber notificações de novos agendamentos)</label>
+    <input name="owner_phone" placeholder="Ex: 5511999999999 (com DDI e DDD, sem + ou espaços)"></div>
     <div class="grid3">
         <div class="form-group"><label>Abre às</label>
         <input name="open_time" type="time" value="09:00"></div>
@@ -231,9 +268,24 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
     <button type="submit" class="btn btn-primary">Criar cliente</button>
     </form>
 </div>
-
 </div>
+
 <script>
+const ICON_SUGGESTIONS = {str(ICON_SUGGESTIONS).replace("'", '"')};
+
+function selectIcon(el, suffix) {{
+    document.querySelectorAll('#icons-' + suffix + ' .icon-opt').forEach(e => e.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('icon_val_' + suffix).value = el.dataset.icon;
+}}
+function updateIcons(bizType, suffix) {{
+    const icons = ICON_SUGGESTIONS[bizType] || ICON_SUGGESTIONS['outro'];
+    const container = document.getElementById('icons-' + suffix);
+    container.innerHTML = icons.map((ic, i) =>
+        `<div class="icon-opt ${{i===0?'selected':''}}" data-icon="${{ic}}" onclick="selectIcon(this,'${{suffix}}')">${{ic}}</div>`
+    ).join('');
+    document.getElementById('icon_val_' + suffix).value = icons[0];
+}}
 function toggleDay(btn, suffix) {{
     btn.classList.toggle('active');
     const grid = document.getElementById('days-' + suffix);
@@ -245,19 +297,16 @@ function toggleDay(btn, suffix) {{
 
 @router.post("/admin/tenant")
 async def create_tenant(request: Request, db: Session = Depends(get_db)):
-    if not check_admin(request):
-        return RedirectResponse("/admin/login", status_code=302)
+    if not check_admin(request): return RedirectResponse("/admin/login", status_code=302)
     form = await request.form()
     name = form.get("name", "").strip()
     raw_pw = form.get("dashboard_password", "").strip()
-    if not name or not raw_pw:
-        return RedirectResponse("/admin?error=campos", status_code=302)
-
+    if not name or not raw_pw: return RedirectResponse("/admin?error=campos", status_code=302)
     hashed = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt()).decode()
     tenant = Tenant(
-        name=name,
-        display_name=name,
+        name=name, display_name=name,
         business_type=form.get("business_type", "petshop"),
+        tenant_icon=form.get("tenant_icon", "🐾"),
         phone_number_id=form.get("phone_number_id") or None,
         wa_access_token=form.get("wa_access_token") or None,
         subject_label=form.get("subject_label", "Pet"),
@@ -267,6 +316,8 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
         open_days=form.get("open_days", "0,1,2,3,4,5"),
         open_time=form.get("open_time", "09:00"),
         close_time=form.get("close_time", "18:00"),
+        owner_phone=form.get("owner_phone") or None,
+        notify_new_appt=True,
         dashboard_password=hashed,
         dashboard_token=secrets.token_urlsafe(32),
         bot_active=True,
@@ -278,48 +329,29 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant.id}?created=1", status_code=302)
 
-# ── DELETAR TENANT (com todos os dados) ───────────────────────────────────────
 @router.post("/admin/tenant/{tenant_id}/delete")
 def delete_tenant(tenant_id: str, request: Request, db: Session = Depends(get_db)):
-    if not check_admin(request):
-        return RedirectResponse("/admin/login", status_code=302)
-
+    if not check_admin(request): return RedirectResponse("/admin/login", status_code=302)
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        return RedirectResponse("/admin", status_code=302)
-
-    # Deleta tudo relacionado ao tenant (ordem importa por integridade)
+    if not tenant: return RedirectResponse("/admin", status_code=302)
     db.query(Appointment).filter(Appointment.tenant_id == tenant_id).delete()
     db.query(Customer).filter(Customer.tenant_id == tenant_id).delete()
     db.query(Service).filter(Service.tenant_id == tenant_id).delete()
     db.query(Conversation).filter(Conversation.tenant_id == tenant_id).delete()
+    db.query(BlockedSlot).filter(BlockedSlot.tenant_id == tenant_id).delete()
     db.delete(tenant)
     db.commit()
-
     return RedirectResponse("/admin?deleted=1", status_code=302)
 
 def _default_services(business_type, tenant_id):
     defaults = {
-        "petshop": [
-            ("Banho Simples", 60, 4000, "#74b9ff", "Banho com secagem"),
-            ("Banho e Tosa", 90, 7000, "#6C5CE7", "Banho completo com tosa"),
-            ("Tosa Higiênica", 45, 3500, "#a29bfe", "Limpeza higiênica"),
-            ("Consulta Veterinária", 30, 12000, "#00b894", "Consulta com vet"),
-        ],
-        "clinica": [
-            ("Consulta Clínica", 30, 15000, "#00b894", "Consulta geral"),
-            ("Vacinação", 20, 8000, "#55efc4", "Aplicação de vacinas"),
-            ("Exame de Sangue", 15, 12000, "#fd79a8", "Coleta e análise"),
-            ("Cirurgia", 120, 80000, "#e17055", "Procedimento cirúrgico"),
-            ("Internação Diária", 1440, 25000, "#fdcb6e", "Internação 24h"),
-        ],
-        "adocao": [
-            ("Consulta Pré-adoção", 30, 0, "#00b894", "Avaliação para adoção"),
-            ("Castração", 90, 35000, "#6C5CE7", "Castração"),
-            ("Microchip", 20, 5000, "#74b9ff", "Implante de microchip"),
-            ("Vacinação", 20, 6000, "#55efc4", "Carteira de vacinação"),
-        ],
-        "outro": [("Serviço Padrão", 60, 10000, "#6C5CE7", "Descreva seu serviço")],
+        "petshop":   [("Banho Simples",60,4000,"#74b9ff","Banho com secagem"),("Banho e Tosa",90,7000,"#6C5CE7","Banho completo com tosa"),("Tosa Higiênica",45,3500,"#a29bfe","Limpeza higiênica"),("Consulta Veterinária",30,12000,"#00b894","Consulta com vet")],
+        "clinica":   [("Consulta Clínica",30,15000,"#00b894","Consulta geral"),("Vacinação",20,8000,"#55efc4","Aplicação de vacinas"),("Exame de Sangue",15,12000,"#fd79a8","Coleta e análise"),("Cirurgia",120,80000,"#e17055","Procedimento cirúrgico")],
+        "adocao":    [("Consulta Pré-adoção",30,0,"#00b894","Avaliação para adoção"),("Castração",90,35000,"#6C5CE7","Castração"),("Microchip",20,5000,"#74b9ff","Implante de microchip"),("Vacinação",20,6000,"#55efc4","Carteira de vacinação")],
+        "barbearia": [("Corte",30,4000,"#74b9ff","Corte masculino"),("Barba",20,3000,"#6C5CE7","Barba completa"),("Corte + Barba",50,6500,"#a29bfe","Combo completo"),("Sobrancelha",15,1500,"#00b894","Design de sobrancelha")],
+        "salao":     [("Corte Feminino",60,8000,"#fd79a8","Corte e finalização"),("Escova",45,6000,"#f0a500","Escova progressiva"),("Coloração",120,15000,"#6C5CE7","Coloração completa"),("Manicure",40,4000,"#00b894","Unhas mãos")],
+        "estetica":  [("Limpeza de Pele",60,9000,"#74b9ff","Limpeza profunda"),("Depilação",45,6000,"#fd79a8","Depilação a cera"),("Massagem",60,12000,"#00b894","Massagem relaxante"),("Design de Sobrancelha",30,5000,"#6C5CE7","Design completo")],
+        "outro":     [("Serviço Padrão",60,10000,"#6C5CE7","Descreva seu serviço")],
     }
     return [
         Service(tenant_id=tenant_id, name=n, duration_min=d, price=p, color=c, description=desc, active=True)
@@ -328,42 +360,37 @@ def _default_services(business_type, tenant_id):
 
 @router.get("/admin/tenant/{tenant_id}", response_class=HTMLResponse)
 def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db)):
-    if not check_admin(request):
-        return RedirectResponse("/admin/login", status_code=302)
+    if not check_admin(request): return RedirectResponse("/admin/login", status_code=302)
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
+    if not tenant: return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
 
     services = db.query(Service).filter(Service.tenant_id == tenant_id).order_by(Service.active.desc(), Service.name).all()
+    blocked = db.query(BlockedSlot).filter(BlockedSlot.tenant_id == tenant_id).order_by(BlockedSlot.date, BlockedSlot.time).all()
+
     created = request.query_params.get("created") == "1"
     saved   = request.query_params.get("saved") == "1"
     alert = ""
     if created: alert = '<div class="alert alert-success">✅ Cliente criado com sucesso!</div>'
     if saved:   alert = '<div class="alert alert-success">✅ Salvo com sucesso!</div>'
 
-    # ── URL correta sempre com HTTPS em produção ──
     base_url = get_base_url(request)
     dashboard_url = f"{base_url}/dashboard?tid={tenant_id}"
     tipo = BUSINESS_TYPES.get(tenant.business_type, tenant.business_type)
+    current_icon = getattr(tenant, 'tenant_icon', '🐾') or '🐾'
 
     total_appts   = db.query(Appointment).filter(Appointment.tenant_id == tenant_id).count()
     total_clients = db.query(Customer).filter(Customer.tenant_id == tenant_id).count()
-    active_appts  = db.query(Appointment).filter(
-        Appointment.tenant_id == tenant_id,
-        Appointment.status.in_(["confirmed", "in_progress"])
-    ).count()
+    active_appts  = db.query(Appointment).filter(Appointment.tenant_id == tenant_id, Appointment.status.in_(["confirmed","in_progress"])).count()
 
+    # Serviços
     svc_rows = ""
     for s in services:
         status_badge = '<span class="badge badge-green">Ativo</span>' if s.active else '<span class="badge badge-gray">Inativo</span>'
         price_fmt = f"R$ {s.price/100:.2f}" if s.price else "Grátis"
-        svc_rows += f"""
-        <div class="service-row">
-            <div class="service-color-dot" style="background:{s.color or '#6C5CE7'}"></div>
-            <div style="flex:1">
-                <div class="service-name">{s.name}</div>
-                <div class="service-meta">{s.duration_min}min · {price_fmt} · {s.description or ''}</div>
-            </div>
+        svc_rows += f"""<div class="service-row">
+            <div style="width:12px;height:12px;border-radius:3px;flex-shrink:0;background:{s.color or '#6C5CE7'}"></div>
+            <div style="flex:1"><div style="font-weight:600;font-size:14px">{s.name}</div>
+            <div style="font-size:12px;color:#9aa0b8">{s.duration_min}min · {price_fmt} · {s.description or ''}</div></div>
             {status_badge}
             <form method="POST" action="/admin/tenant/{tenant_id}/service/{s.id}/edit" style="display:flex;gap:6px;align-items:center">
                 <input name="price" type="number" step="0.01" value="{s.price/100:.2f}" style="width:80px;padding:4px 8px;font-size:12px">
@@ -374,26 +401,48 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
                 <button type="submit" class="btn btn-outline btn-sm">{'⏸' if s.active else '▶'}</button>
             </form>
             <form method="POST" action="/admin/tenant/{tenant_id}/service/{s.id}/delete">
-                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Remover serviço?')">✕</button>
+                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Remover?')">✕</button>
             </form>
         </div>"""
+    if not svc_rows: svc_rows = '<div style="color:#9aa0b8;text-align:center;padding:16px">Nenhum serviço.</div>'
 
-    if not svc_rows:
-        svc_rows = '<div style="color:#9aa0b8;text-align:center;padding:16px">Nenhum serviço.</div>'
-
-    open_days_list = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
+    # Dias
+    open_days_list = [d.strip() for d in (getattr(tenant,'open_days','0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
     days_btns = ''.join(
         f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" data-day="{i}" onclick="toggleDay(this,\'edit\')">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
     bot_checked = 'checked' if getattr(tenant, 'bot_active', True) else ''
+    notify_checked = 'checked' if getattr(tenant, 'notify_new_appt', True) else ''
+
+    # Ícones
+    suggestions = ICON_SUGGESTIONS.get(tenant.business_type, ICON_SUGGESTIONS['outro'])
+    all_icons = list(dict.fromkeys(suggestions + ["🐾","💈","💅","✨","🏥","🐶","⚙️","📅","🌟","🎯"]))
+    icon_opts = ''.join(
+        f'<div class="icon-opt {"selected" if ico == current_icon else ""}" data-icon="{ico}" onclick="selectIcon(this,\'edit\')">{ico}</div>'
+        for ico in all_icons
+    )
+
+    # Horários bloqueados
+    blocked_rows = ""
+    for b in blocked:
+        time_label = b.time if b.time else "Dia inteiro"
+        reason_label = f'<span class="blocked-reason">{b.reason}</span>' if b.reason else ""
+        blocked_rows += f"""<div class="blocked-row">
+            <div class="blocked-date">{b.date}</div>
+            <div class="blocked-time">{time_label}</div>
+            {reason_label}
+            <form method="POST" action="/admin/tenant/{tenant_id}/blocked/{b.id}/delete" style="margin-left:auto">
+                <button type="submit" class="btn btn-danger btn-sm">✕</button>
+            </form>
+        </div>"""
+    if not blocked_rows:
+        blocked_rows = '<div style="color:#9aa0b8;font-size:13px;padding:10px 0">Nenhum horário bloqueado.</div>'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>Admin — {tenant.display_name or tenant.name}</title>{ADMIN_STYLE}</head><body>
-<div class="header">
-    <div class="logo">⚙️ Admin Panel</div>
-    <a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a>
-</div>
+<div class="header"><div class="logo">⚙️ Admin Panel</div>
+<a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a></div>
 <div class="container">
 <a href="/admin" class="back">← Voltar</a>
 {alert}
@@ -404,10 +453,11 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     <div class="stat-mini"><div class="stat-mini-num">{active_appts}</div><div class="stat-mini-label">Em aberto</div></div>
 </div>
 
+<!-- Link -->
 <div class="card">
     <div class="card-title">🔗 Acesso do cliente <span class="tag">{tipo}</span></div>
     <div class="link-box">
-        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel — envie este link para o cliente</div>
+        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel — envie para o cliente</div>
         <div class="link-url" id="dash-url">{dashboard_url}</div>
     </div>
     <div style="display:flex;gap:8px">
@@ -416,6 +466,7 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </div>
 </div>
 
+<!-- Config -->
 <div class="card">
     <div class="card-title">🏢 Configurações do negócio</div>
     <form method="POST" action="/admin/tenant/{tenant_id}/config">
@@ -423,9 +474,14 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         <div class="form-group"><label>Nome exibido</label>
         <input name="display_name" value="{tenant.display_name or tenant.name}"></div>
         <div class="form-group"><label>Tipo</label>
-        <select name="business_type">
+        <select name="business_type" onchange="updateIcons(this.value,'edit')">
             {''.join(f'<option value="{k}" {"selected" if k==tenant.business_type else ""}>{v}</option>' for k,v in BUSINESS_TYPES.items())}
         </select></div>
+    </div>
+    <div class="form-group">
+        <label>Ícone do painel</label>
+        <div class="icon-picker" id="icons-edit">{icon_opts}</div>
+        <input type="hidden" name="tenant_icon" id="icon_val_edit" value="{current_icon}">
     </div>
     <div class="grid3">
         <div class="form-group"><label>Nome da atendente (IA)</label>
@@ -441,6 +497,8 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         <div class="form-group"><label>WA Access Token</label>
         <input name="wa_access_token" value="{tenant.wa_access_token or ''}"></div>
     </div>
+    <div class="form-group"><label>WhatsApp do dono (notificações de novos agendamentos)</label>
+    <input name="owner_phone" value="{getattr(tenant,'owner_phone','') or ''}" placeholder="5511999999999"></div>
     <div class="divider"></div>
     <div class="section-title">⏰ Horário de funcionamento</div>
     <div class="grid2">
@@ -455,17 +513,25 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         <input type="hidden" name="open_days" id="open_days_edit" value="{getattr(tenant,'open_days','0,1,2,3,4,5') or '0,1,2,3,4,5'}">
     </div>
     <div class="divider"></div>
-    <div style="display:flex;align-items:center;justify-content:space-between">
-        <label class="toggle-switch">
-            <input type="checkbox" name="bot_active" value="1" {bot_checked}>
-            <span class="slider"></span>
-            <span style="font-size:13px;color:#e8eaf2;font-weight:600">Bot ativo</span>
-        </label>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div style="display:flex;gap:20px;flex-wrap:wrap">
+            <label class="toggle-switch">
+                <input type="checkbox" name="bot_active" value="1" {bot_checked}>
+                <span class="slider"></span>
+                <span style="font-size:13px;color:#e8eaf2;font-weight:600">Bot ativo</span>
+            </label>
+            <label class="toggle-switch">
+                <input type="checkbox" name="notify_new_appt" value="1" {notify_checked}>
+                <span class="slider"></span>
+                <span style="font-size:13px;color:#e8eaf2;font-weight:600">Notificar novos agendamentos</span>
+            </label>
+        </div>
         <button type="submit" class="btn btn-primary">Salvar configurações</button>
     </div>
     </form>
 </div>
 
+<!-- Senha -->
 <div class="card">
     <div class="card-title">🔑 Senha do dashboard</div>
     <form method="POST" action="/admin/tenant/{tenant_id}/password">
@@ -477,6 +543,45 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </form>
 </div>
 
+<!-- Tutorial WhatsApp -->
+<div class="card">
+    <div class="card-title">📱 Como conectar o WhatsApp</div>
+    <div style="font-size:12px;color:#9aa0b8;margin-bottom:16px">Siga os passos para integrar o bot com o WhatsApp do cliente via Meta Business</div>
+    <div class="tutorial-step">
+        <div class="step-num">1</div>
+        <div class="step-text">Acesse <a href="https://developers.facebook.com" target="_blank">developers.facebook.com</a> e faça login com a conta Facebook do cliente (ou da empresa).</div>
+    </div>
+    <div class="tutorial-step">
+        <div class="step-num">2</div>
+        <div class="step-text">Crie um <strong>App do tipo Business</strong>. No painel, vá em <strong>Adicionar produto</strong> e selecione <strong>WhatsApp</strong>.</div>
+    </div>
+    <div class="tutorial-step">
+        <div class="step-num">3</div>
+        <div class="step-text">Em <strong>WhatsApp → Configuração</strong>, você verá o <strong>Phone Number ID</strong> — copie e cole no campo acima.<br>
+        <div class="code-box">Exemplo: 123456789012345</div></div>
+    </div>
+    <div class="tutorial-step">
+        <div class="step-num">4</div>
+        <div class="step-text">Ainda na mesma página, clique em <strong>Gerar token de acesso</strong> (ou use um token permanente do System User em Configurações da empresa). Cole no campo <strong>WA Access Token</strong>.<br>
+        <div class="code-box">Começa com: EAAxxxxxxx...</div></div>
+    </div>
+    <div class="tutorial-step">
+        <div class="step-num">5</div>
+        <div class="step-text">Configure o <strong>Webhook</strong>: vá em <strong>WhatsApp → Configuração → Webhooks</strong>. URL do webhook:<br>
+        <div class="code-box">{get_base_url(request)}/webhook</div>
+        Token de verificação: <div class="code-box">{os.getenv('WHATSAPP_VERIFY_TOKEN','agendabot123')}</div></div>
+    </div>
+    <div class="tutorial-step">
+        <div class="step-num">6</div>
+        <div class="step-text">Assine os eventos: marque <strong>messages</strong> nos campos do webhook e salve.</div>
+    </div>
+    <div class="tutorial-step">
+        <div class="step-num">7</div>
+        <div class="step-text">Salve as configurações acima e teste enviando uma mensagem para o número do WhatsApp. O bot deve responder automaticamente. ✅</div>
+    </div>
+</div>
+
+<!-- Serviços -->
 <div class="card">
     <div class="card-title">✂️ Serviços ({len(services)})</div>
     {svc_rows}
@@ -485,15 +590,15 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     <form method="POST" action="/admin/tenant/{tenant_id}/service">
     <div class="grid3">
         <div class="form-group"><label>Nome *</label>
-        <input name="name" placeholder="Ex: Banho e Tosa" required></div>
+        <input name="name" placeholder="Ex: Corte + Barba" required></div>
         <div class="form-group"><label>Duração (min)</label>
         <input name="duration_min" type="number" value="60" min="5"></div>
         <div class="form-group"><label>Preço (R$)</label>
-        <input name="price" type="number" step="0.01" placeholder="70.00"></div>
+        <input name="price" type="number" step="0.01" placeholder="50.00"></div>
     </div>
     <div class="grid2">
         <div class="form-group"><label>Descrição (para o bot)</label>
-        <input name="description" placeholder="Ex: Banho com secagem e perfume"></div>
+        <input name="description" placeholder="Ex: Corte e acabamento completo"></div>
         <div class="form-group"><label>Cor</label>
         <input name="color" type="color" value="#6C5CE7" style="height:42px;padding:4px 8px"></div>
     </div>
@@ -501,20 +606,53 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </form>
 </div>
 
+<!-- Bloqueio de horários -->
+<div class="card">
+    <div class="card-title">🚫 Bloquear horários</div>
+    <div style="font-size:12px;color:#9aa0b8;margin-bottom:14px">Bloqueie dias ou horários específicos. O bot não vai agendar nesses períodos.</div>
+    {blocked_rows}
+    <div class="divider"></div>
+    <div class="section-title">Adicionar bloqueio</div>
+    <form method="POST" action="/admin/tenant/{tenant_id}/blocked">
+    <div class="grid3">
+        <div class="form-group"><label>Data *</label>
+        <input name="date" type="date" required></div>
+        <div class="form-group"><label>Horário (vazio = dia inteiro)</label>
+        <input name="time" type="time" placeholder="Deixe vazio para bloquear o dia todo"></div>
+        <div class="form-group"><label>Motivo</label>
+        <input name="reason" placeholder="Ex: Férias, Feriado local..."></div>
+    </div>
+    <button type="submit" class="btn btn-primary">Bloquear</button>
+    </form>
+</div>
+
 <!-- Zona de perigo -->
 <div class="danger-zone">
     <div class="danger-title">⚠️ Zona de Perigo</div>
-    <p style="font-size:13px;color:#9aa0b8;margin-bottom:14px">
-        Deletar este cliente remove permanentemente todos os agendamentos, clientes e dados associados. Esta ação não pode ser desfeita.
-    </p>
+    <p style="font-size:13px;color:#9aa0b8;margin-bottom:14px">Deletar remove permanentemente todos os dados. Sem volta.</p>
     <form method="POST" action="/admin/tenant/{tenant_id}/delete"
-          onsubmit="return confirm('⚠️ DELETAR {tenant.display_name or tenant.name}?\\n\\nTodos os dados serão apagados permanentemente. Não tem volta!')">
+          onsubmit="return confirm('⚠️ DELETAR {tenant.display_name or tenant.name}?\\n\\nTodos os dados apagados. Sem volta!')">
         <button type="submit" class="btn btn-danger">🗑️ Deletar este cliente permanentemente</button>
     </form>
 </div>
 
 </div>
 <script>
+const ICON_SUGGESTIONS = {str(ICON_SUGGESTIONS).replace("'", '"')};
+function selectIcon(el, suffix) {{
+    document.querySelectorAll('#icons-' + suffix + ' .icon-opt').forEach(e => e.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('icon_val_' + suffix).value = el.dataset.icon;
+}}
+function updateIcons(bizType, suffix) {{
+    const icons = ICON_SUGGESTIONS[bizType] || ICON_SUGGESTIONS['outro'];
+    const container = document.getElementById('icons-' + suffix);
+    if (!container) return;
+    container.innerHTML = icons.map((ic, i) =>
+        `<div class="icon-opt ${{i===0?'selected':''}}" data-icon="${{ic}}" onclick="selectIcon(this,'${{suffix}}')">${{ic}}</div>`
+    ).join('');
+    document.getElementById('icon_val_' + suffix).value = icons[0];
+}}
 function toggleDay(btn, suffix) {{
     btn.classList.toggle('active');
     const grid = document.getElementById('days-' + suffix);
@@ -526,22 +664,24 @@ function toggleDay(btn, suffix) {{
 
 @router.post("/admin/tenant/{tenant_id}/config")
 async def save_config(tenant_id: str, request: Request, db: Session = Depends(get_db)):
-    if not check_admin(request):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     form = await request.form()
     t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
-    t.display_name        = form.get("display_name", t.display_name)
-    t.business_type       = form.get("business_type", t.business_type)
-    t.subject_label       = form.get("subject_label", t.subject_label)
+    t.display_name         = form.get("display_name", t.display_name)
+    t.business_type        = form.get("business_type", t.business_type)
+    t.tenant_icon          = form.get("tenant_icon", getattr(t, 'tenant_icon', '🐾'))
+    t.subject_label        = form.get("subject_label", t.subject_label)
     t.subject_label_plural = form.get("subject_label_plural", t.subject_label_plural)
-    t.bot_attendant_name  = form.get("bot_attendant_name", getattr(t, 'bot_attendant_name', 'Mari'))
-    t.phone_number_id     = form.get("phone_number_id") or t.phone_number_id
-    t.wa_access_token     = form.get("wa_access_token") or t.wa_access_token
-    t.open_time           = form.get("open_time", getattr(t, 'open_time', '09:00'))
-    t.close_time          = form.get("close_time", getattr(t, 'close_time', '18:00'))
-    t.open_days           = form.get("open_days", getattr(t, 'open_days', '0,1,2,3,4,5'))
-    t.bot_active          = form.get("bot_active") == "1"
+    t.bot_attendant_name   = form.get("bot_attendant_name", getattr(t, 'bot_attendant_name', 'Mari'))
+    t.phone_number_id      = form.get("phone_number_id") or t.phone_number_id
+    t.wa_access_token      = form.get("wa_access_token") or t.wa_access_token
+    t.open_time            = form.get("open_time", getattr(t, 'open_time', '09:00'))
+    t.close_time           = form.get("close_time", getattr(t, 'close_time', '18:00'))
+    t.open_days            = form.get("open_days", getattr(t, 'open_days', '0,1,2,3,4,5'))
+    t.owner_phone          = form.get("owner_phone") or getattr(t, 'owner_phone', None)
+    t.bot_active           = form.get("bot_active") == "1"
+    t.notify_new_appt      = form.get("notify_new_appt") == "1"
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
@@ -563,16 +703,10 @@ async def add_service(tenant_id: str, request: Request, db: Session = Depends(ge
     form = await request.form()
     name = form.get("name", "").strip()
     if not name: return RedirectResponse(f"/admin/tenant/{tenant_id}", status_code=302)
-    try: price_cents = int(float(form.get("price", "0")) * 100)
+    try: price_cents = int(float(form.get("price","0")) * 100)
     except: price_cents = 0
-    db.add(Service(
-        tenant_id=tenant_id, name=name,
-        duration_min=int(form.get("duration_min", 60)),
-        price=price_cents,
-        description=form.get("description", ""),
-        color=form.get("color", "#6C5CE7"),
-        active=True,
-    ))
+    db.add(Service(tenant_id=tenant_id, name=name, duration_min=int(form.get("duration_min",60)),
+        price=price_cents, description=form.get("description",""), color=form.get("color","#6C5CE7"), active=True))
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
@@ -593,16 +727,46 @@ async def edit_service(tenant_id: str, service_id: str, request: Request, db: Se
 def toggle_service(tenant_id: str, service_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     svc = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant_id).first()
-    if svc:
-        svc.active = not svc.active
-        db.commit()
+    if svc: svc.active = not svc.active; db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
 @router.post("/admin/tenant/{tenant_id}/service/{service_id}/delete")
 def delete_service(tenant_id: str, service_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     svc = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant_id).first()
-    if svc:
-        db.delete(svc)
-        db.commit()
+    if svc: db.delete(svc); db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
+# ── Bloqueio de horários ──────────────────────────────────────────────────────
+@router.post("/admin/tenant/{tenant_id}/blocked")
+async def add_blocked(tenant_id: str, request: Request, db: Session = Depends(get_db)):
+    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    form = await request.form()
+    date = form.get("date", "").strip()
+    if not date: return RedirectResponse(f"/admin/tenant/{tenant_id}", status_code=302)
+    time_val = form.get("time", "").strip() or None
+    reason = form.get("reason", "").strip() or None
+    from ..models import BlockedSlot
+    import uuid
+    db.add(BlockedSlot(id=str(uuid.uuid4()), tenant_id=tenant_id, date=date, time=time_val, reason=reason))
+    db.commit()
+    return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
+@router.post("/admin/tenant/{tenant_id}/blocked/{blocked_id}/delete")
+def delete_blocked(tenant_id: str, blocked_id: str, request: Request, db: Session = Depends(get_db)):
+    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    b = db.query(BlockedSlot).filter(BlockedSlot.id == blocked_id, BlockedSlot.tenant_id == tenant_id).first()
+    if b: db.delete(b); db.commit()
+    return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
+# ── Migração v3 via HTTP ──────────────────────────────────────────────────────
+@router.post("/admin/migrate-v3")
+def migrate_v3_route(request: Request):
+    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    from ..database import engine
+    from migrate_v3 import run_migration
+    try:
+        results = run_migration(engine)
+        return {"success": True, "results": results}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

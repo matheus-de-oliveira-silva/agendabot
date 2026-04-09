@@ -53,6 +53,12 @@ def _auto_migrate():
         print(f"[migrate] ❌ Erro geral na migração: {e}")
 
 _auto_migrate()
+@app.post("/admin/migrate-v3")
+def migrate_v3_http(request: Request):
+    from .database import engine
+    from migrate_v3 import run_migration
+    results = run_migration(engine)
+    return {"results": results}
 # ─────────────────────────────────────────────────────────────────────────────
 
 

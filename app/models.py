@@ -14,25 +14,32 @@ class Tenant(Base):
     name = Column(String, nullable=False)
     phone_number_id = Column(String, unique=True)
     wa_access_token = Column(String)
-    business_type = Column(String, default="petshop")  # petshop | clinica | adocao | outro
+    business_type = Column(String, default="petshop")
     created_at = Column(DateTime, server_default=func.now())
 
-    # Auth do dashboard
-    dashboard_password = Column(String, nullable=True)  # hash bcrypt
-    dashboard_token = Column(String, nullable=True)     # token de sessão
+    # Auth
+    dashboard_password = Column(String, nullable=True)
+    dashboard_token = Column(String, nullable=True)
 
-    # Configurações visuais/nome
+    # Visual
     display_name = Column(String, nullable=True)
     subject_label = Column(String, default="Pet")
     subject_label_plural = Column(String, default="Pets")
+    tenant_icon = Column(String, default="🐾")          # ← NOVO: ícone personalizável
 
-    # ── COLUNAS QUE FALTAVAM (causavam bug no admin) ──
+    # Bot
     bot_attendant_name = Column(String, default="Mari")
     bot_business_name = Column(String, nullable=True)
-    open_days = Column(String, default="0,1,2,3,4,5")   # dias de funcionamento
+    bot_active = Column(Boolean, default=True)
+
+    # Horários
+    open_days = Column(String, default="0,1,2,3,4,5")
     open_time = Column(String, default="09:00")
     close_time = Column(String, default="18:00")
-    bot_active = Column(Boolean, default=True)
+
+    # Notificação para o dono
+    owner_phone = Column(String, nullable=True)          # ← NOVO: WhatsApp do dono para notificações
+    notify_new_appt = Column(Boolean, default=True)      # ← NOVO: notificar quando bot agendar
 
 
 class Customer(Base):
@@ -66,7 +73,7 @@ class Service(Base):
     tenant_id = Column(String, nullable=False)
     name = Column(String, nullable=False)
     duration_min = Column(Integer, default=60)
-    price = Column(Integer, default=0)     # em centavos (ex: 7000 = R$70,00)
+    price = Column(Integer, default=0)
     active = Column(Boolean, default=True)
     description = Column(String, nullable=True)
     color = Column(String, default="#6C5CE7")
@@ -89,13 +96,25 @@ class Appointment(Base):
     notes = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
 
-    # ── PAGAMENTO ──
-    payment_status = Column(String, default="pending")   # pending | paid | waived
-    payment_method = Column(String, nullable=True)       # pix | dinheiro | cartao | outro
-    payment_amount = Column(Integer, nullable=True)      # valor pago em centavos (pode diferir do serviço)
-    payment_pix_key = Column(String, nullable=True)      # chave pix do comprovante
-    payment_paid_at = Column(DateTime, nullable=True)    # quando foi marcado como pago
-    payment_notes = Column(Text, nullable=True)          # observações sobre o pagamento
+    # Pagamento
+    payment_status = Column(String, default="pending")
+    payment_method = Column(String, nullable=True)
+    payment_amount = Column(Integer, nullable=True)
+    payment_pix_key = Column(String, nullable=True)
+    payment_paid_at = Column(DateTime, nullable=True)
+    payment_notes = Column(Text, nullable=True)
+
+
+class BlockedSlot(Base):
+    """Horários bloqueados pelo dono — bot não agenda nesses períodos."""
+    __tablename__ = "blocked_slots"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False)
+    date = Column(String, nullable=False)           # "YYYY-MM-DD"
+    time = Column(String, nullable=True)            # "HH:MM" — None = dia inteiro bloqueado
+    reason = Column(String, nullable=True)          # "Férias", "Folga", etc.
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class Conversation(Base):
@@ -107,4 +126,3 @@ class Conversation(Base):
     messages = Column(Text, default="[]")
     state = Column(String, default="idle")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    
