@@ -244,9 +244,14 @@ async def telegram_webhook(request: Request):
                     reply_text = "Serviço não encontrado. Pode escolher outro?"
                 else:
                     customer_name_ai = ai_response.get("customer_name", "")
-                    if customer_name_ai and not customer.name:
-                        customer.name = customer_name_ai
+                    # Usa o nome da IA, ou o nome já salvo no banco, ou o first_name do Telegram
+                    nome_final = customer_name_ai or customer.name or first_name or ""
+                    if nome_final and not customer.name:
+                        customer.name = nome_final
                         db.commit()
+                    # Garante que customer_name nunca vai vazio no JSON
+                    if not ai_response.get("customer_name") and nome_final:
+                        ai_response["customer_name"] = nome_final
 
                     result = create_appointment(
                         db=db, tenant_id=tenant.id, customer_id=customer.id,
