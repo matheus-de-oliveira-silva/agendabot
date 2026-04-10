@@ -242,10 +242,11 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
         </div></div>
     </div>
     <div class="grid2">
-        <div class="form-group"><label>Phone Number ID (WhatsApp)</label>
-        <input name="phone_number_id" placeholder="ID do número na Meta"></div>
-        <div class="form-group"><label>WA Access Token</label>
-        <input name="wa_access_token" placeholder="Token da API"></div>
+        <div class="form-group"><label>Instância Evolution API (ou Phone Number ID Meta)</label>
+        <input name="phone_number_id" placeholder="Ex: barbearia-joao">
+        <div style="font-size:11px;color:#9aa0b8;margin-top:4px">⚡ Evolution: nome da instância. Meta API: ID do número.</div></div>
+        <div class="form-group"><label>WA Token (somente Meta API — vazio para Evolution)</label>
+        <input name="wa_access_token" placeholder="EAAxxxxxxx... (só Meta API)"></div>
     </div>
     <div class="form-group"><label>WhatsApp do dono (para receber notificações de novos agendamentos)</label>
     <input name="owner_phone" placeholder="Ex: 5511999999999 (com DDI e DDD, sem + ou espaços)"></div>
@@ -492,10 +493,16 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         <input name="subject_label_plural" value="{tenant.subject_label_plural or 'Pets'}"></div>
     </div>
     <div class="grid2">
-        <div class="form-group"><label>Phone Number ID</label>
-        <input name="phone_number_id" value="{tenant.phone_number_id or ''}"></div>
-        <div class="form-group"><label>WA Access Token</label>
-        <input name="wa_access_token" value="{tenant.wa_access_token or ''}"></div>
+        <div class="form-group">
+            <label>Instância Evolution API (ou Phone Number ID Meta)</label>
+            <input name="phone_number_id" value="{tenant.phone_number_id or ''}" placeholder="Ex: barbearia-joao">
+            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">⚡ Evolution: nome da instância. Meta API: ID do número.</div>
+        </div>
+        <div class="form-group">
+            <label>WA Token (somente Meta API — vazio para Evolution)</label>
+            <input name="wa_access_token" value="{tenant.wa_access_token or ''}" placeholder="EAAxxxxxxx... (só Meta API)">
+            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">⚡ Evolution API: deixe em branco.</div>
+        </div>
     </div>
     <div class="form-group"><label>WhatsApp do dono (notificações de novos agendamentos)</label>
     <input name="owner_phone" value="{getattr(tenant,'owner_phone','') or ''}" placeholder="5511999999999"></div>
@@ -546,40 +553,98 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
 <!-- Tutorial WhatsApp -->
 <div class="card">
     <div class="card-title">📱 Como conectar o WhatsApp</div>
-    <div style="font-size:12px;color:#9aa0b8;margin-bottom:16px">Siga os passos para integrar o bot com o WhatsApp do cliente via Meta Business</div>
-    <div class="tutorial-step">
-        <div class="step-num">1</div>
-        <div class="step-text">Acesse <a href="https://developers.facebook.com" target="_blank">developers.facebook.com</a> e faça login com a conta Facebook do cliente (ou da empresa).</div>
+
+    <!-- Tabs de modo -->
+    <div style="display:flex;gap:8px;margin-bottom:20px">
+        <button onclick="showMode('evolution',this)" id="btn-evo" class="btn btn-primary btn-sm">⚡ Evolution API (recomendado)</button>
+        <button onclick="showMode('meta',this)" id="btn-meta" class="btn btn-outline btn-sm">🏢 Meta API Oficial</button>
     </div>
-    <div class="tutorial-step">
-        <div class="step-num">2</div>
-        <div class="step-text">Crie um <strong>App do tipo Business</strong>. No painel, vá em <strong>Adicionar produto</strong> e selecione <strong>WhatsApp</strong>.</div>
+
+    <!-- Evolution API -->
+    <div id="mode-evolution">
+        <div style="background:#1a2e1a;border:1px solid rgba(104,211,145,.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#68d391">
+            ⚡ <strong>Mais fácil e rápido</strong> — conecta qualquer número WhatsApp via QR Code em minutos. Ideal para começar.
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">1</div>
+            <div class="step-text">Você precisa ter a <strong>Evolution API</strong> rodando. Se ainda não tem, instale com Docker:<br>
+            <div class="code-box">docker run -d -p 8080:8080 --name evolution atendai/evolution-api:latest</div>
+            Ou use um serviço hospedado como <a href="https://evolution-api.com" target="_blank">evolution-api.com</a>.</div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">2</div>
+            <div class="step-text">Acesse o painel da Evolution API (normalmente em <strong>http://seu-servidor:8080</strong>) e crie uma nova instância com o nome do cliente.<br>
+            <div class="code-box">Nome sugerido: barbearia-joao (sem espaços)</div></div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">3</div>
+            <div class="step-text">Conecte o número escaneando o <strong>QR Code</strong> que aparece no painel da Evolution com o WhatsApp Business do cliente. Aguarde aparecer "Connected".</div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">4</div>
+            <div class="step-text">Cole o <strong>nome da instância</strong> no campo "Instância Evolution API" acima.<br>
+            <div class="code-box">Ex: barbearia-joao</div></div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">5</div>
+            <div class="step-text">Configure o Webhook na Evolution API apontando para:<br>
+            <div class="code-box">{get_base_url(request)}/whatsapp/webhook</div>
+            Evento: marque <strong>MESSAGES_UPSERT</strong> e salve.</div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">6</div>
+            <div class="step-text">Configure as variáveis de ambiente no Railway:<br>
+            <div class="code-box">EVOLUTION_API_URL=http://seu-servidor:8080
+EVOLUTION_API_KEY=sua-api-key
+EVOLUTION_INSTANCE=barbearia-joao</div>
+            Depois salve as configurações acima. ✅</div>
+        </div>
     </div>
-    <div class="tutorial-step">
-        <div class="step-num">3</div>
-        <div class="step-text">Em <strong>WhatsApp → Configuração</strong>, você verá o <strong>Phone Number ID</strong> — copie e cole no campo acima.<br>
-        <div class="code-box">Exemplo: 123456789012345</div></div>
-    </div>
-    <div class="tutorial-step">
-        <div class="step-num">4</div>
-        <div class="step-text">Ainda na mesma página, clique em <strong>Gerar token de acesso</strong> (ou use um token permanente do System User em Configurações da empresa). Cole no campo <strong>WA Access Token</strong>.<br>
-        <div class="code-box">Começa com: EAAxxxxxxx...</div></div>
-    </div>
-    <div class="tutorial-step">
-        <div class="step-num">5</div>
-        <div class="step-text">Configure o <strong>Webhook</strong>: vá em <strong>WhatsApp → Configuração → Webhooks</strong>. URL do webhook:<br>
-        <div class="code-box">{get_base_url(request)}/webhook</div>
-        Token de verificação: <div class="code-box">{os.getenv('WHATSAPP_VERIFY_TOKEN','agendabot123')}</div></div>
-    </div>
-    <div class="tutorial-step">
-        <div class="step-num">6</div>
-        <div class="step-text">Assine os eventos: marque <strong>messages</strong> nos campos do webhook e salve.</div>
-    </div>
-    <div class="tutorial-step">
-        <div class="step-num">7</div>
-        <div class="step-text">Salve as configurações acima e teste enviando uma mensagem para o número do WhatsApp. O bot deve responder automaticamente. ✅</div>
+
+    <!-- Meta API Oficial -->
+    <div id="mode-meta" style="display:none">
+        <div style="background:#2a2200;border:1px solid rgba(246,201,14,.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#f6c90e">
+            🏢 <strong>Mais burocrático</strong> — requer aprovação da Meta e verificação de empresa. Melhor para volumes altos e uso profissional.
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">1</div>
+            <div class="step-text">Acesse <a href="https://developers.facebook.com" target="_blank">developers.facebook.com</a> e faça login com a conta Facebook do cliente.</div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">2</div>
+            <div class="step-text">Crie um <strong>App do tipo Business</strong>. No painel, vá em <strong>Adicionar produto</strong> e selecione <strong>WhatsApp</strong>.</div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">3</div>
+            <div class="step-text">Em <strong>WhatsApp → Configuração</strong>, você verá o <strong>Phone Number ID</strong> — cole no campo "Instância" acima.<br>
+            <div class="code-box">Exemplo: 123456789012345</div></div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">4</div>
+            <div class="step-text">Clique em <strong>Gerar token de acesso</strong>. Cole no campo <strong>WA Token</strong> acima.<br>
+            <div class="code-box">Começa com: EAAxxxxxxx...</div></div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">5</div>
+            <div class="step-text">Configure o Webhook em <strong>WhatsApp → Configuração → Webhooks</strong>:<br>
+            URL: <div class="code-box">{get_base_url(request)}/webhook</div>
+            Token: <div class="code-box">{os.getenv('WHATSAPP_VERIFY_TOKEN','agendabot123')}</div></div>
+        </div>
+        <div class="tutorial-step">
+            <div class="step-num">6</div>
+            <div class="step-text">Marque o evento <strong>messages</strong> no webhook, salve e teste. ✅</div>
+        </div>
     </div>
 </div>
+
+<script>
+function showMode(mode, btn) {{
+    document.getElementById('mode-evolution').style.display = mode==='evolution' ? '' : 'none';
+    document.getElementById('mode-meta').style.display      = mode==='meta'      ? '' : 'none';
+    document.getElementById('btn-evo').className  = mode==='evolution' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+    document.getElementById('btn-meta').className = mode==='meta'      ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+}}
+</script>
 
 <!-- Serviços -->
 <div class="card">

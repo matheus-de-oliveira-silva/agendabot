@@ -1,8 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from sqlalchemy import text, inspect as sa_inspect
-import asyncio
+import asyncio, os
 
 load_dotenv()
 
@@ -10,6 +10,14 @@ from .database import engine, Base
 from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook, admin
 
 Base.metadata.create_all(bind=engine)
+
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "troca-essa-senha-admin")
+
+def _require_admin(request: Request):
+    """Protege rotas utilitárias com a mesma senha do admin."""
+    token = request.headers.get("X-Admin-Token") or request.cookies.get("admin_token")
+    if token != ADMIN_SECRET:
+        raise HTTPException(status_code=401, detail="Não autorizado")
 
 # ── Migração v1+v2 ────────────────────────────────────────────────────────────
 def _auto_migrate():
@@ -62,7 +70,11 @@ def _auto_migrate_v3():
                 existentes = {c["name"] for c in inspector.get_columns("tenants")}
             except Exception:
                 existentes = set()
-            for col, tipo in [("tenant_icon","VARCHAR DEFAULT '🐾'"),("owner_phone","VARCHAR"),("notify_new_appt","BOOLEAN DEFAULT TRUE")]:
+            for col, tipo in [
+                ("tenant_icon",     "VARCHAR DEFAULT '🐾'"),
+                ("owner_phone",     "VARCHAR"),
+                ("notify_new_appt", "BOOLEAN DEFAULT TRUE"),
+            ]:
                 if col not in existentes:
                     try:
                         conn.execute(text(f"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS {col} {tipo}"))
@@ -110,8 +122,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AgendaBot API",
     description="Chatbot de agendamento para negocios locais",
-    version="0.1.0",
-    lifespan=lifespan
+    version="1.0.0",
+    lifespan=lifespan,
+    # Desabilita docs em produção para não expor endpoints
+    docs_url=None if os.getenv("ENVIRONMENT") == "production" else "/docs",
+    redoc_url=None,
 )
 
 app.include_router(webhook.router)
@@ -130,14 +145,18 @@ def root():
 def health():
     return {"status": "healthy"}
 
+# ── Rotas utilitárias protegidas por ADMIN_SECRET ─────────────────────────────
+
 @app.post("/test/reminders")
-async def test_reminders():
+async def test_reminders(request: Request):
+    _require_admin(request)
     from .services.reminder import send_daily_reminders
     await send_daily_reminders()
     return {"status": "ok", "message": "Lembretes enviados!"}
 
 @app.post("/setup/tenant")
-def setup_tenant(data: dict):
+def setup_tenant(data: dict, request: Request):
+    _require_admin(request)
     from .database import SessionLocal
     from .models import Tenant, Service
     db = SessionLocal()
@@ -148,13 +167,17 @@ def setup_tenant(data: dict):
         tenant = Tenant(
             name=data["name"],
             business_type=data.get("business_type", "petshop"),
-            phone_number_id=data.get("phone_number_id", "TEST123"),
-            wa_access_token=data.get("wa_access_token", "TOKEN_TESTE")
+            phone_number_id=data.get("phone_number_id"),
+            wa_access_token=data.get("wa_access_token"),
         )
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
-        for s in [{"name":"Banho simples","duration_min":60,"price":4000},{"name":"Banho e tosa","duration_min":90,"price":7000},{"name":"Tosa higienica","duration_min":45,"price":3500}]:
+        for s in [
+            {"name": "Banho simples",  "duration_min": 60, "price": 4000},
+            {"name": "Banho e tosa",   "duration_min": 90, "price": 7000},
+            {"name": "Tosa higienica", "duration_min": 45, "price": 3500},
+        ]:
             db.add(Service(tenant_id=tenant.id, **s))
         db.commit()
         return {"tenant_id": tenant.id, "message": "criado com sucesso"}
@@ -162,22 +185,45 @@ def setup_tenant(data: dict):
         db.close()
 
 @app.post("/admin/migrate")
-def migrate_legacy():
+def migrate_legacy(request: Request):
+    """Rota legada — mantida por compatibilidade."""
+    _require_admin(request)
     with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS pet_id VARCHAR, ADD COLUMN IF NOT EXISTS pet_name VARCHAR, ADD COLUMN IF NOT EXISTS pet_breed VARCHAR, ADD COLUMN IF NOT EXISTS pet_weight FLOAT, ADD COLUMN IF NOT EXISTS pickup_time VARCHAR;"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS pets (id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, customer_id VARCHAR NOT NULL, name VARCHAR NOT NULL, breed VARCHAR, weight FLOAT, notes TEXT, created_at TIMESTAMP DEFAULT NOW());"))
+        conn.execute(text("""
+            ALTER TABLE appointments
+            ADD COLUMN IF NOT EXISTS pet_id VARCHAR,
+            ADD COLUMN IF NOT EXISTS pet_name VARCHAR,
+            ADD COLUMN IF NOT EXISTS pet_breed VARCHAR,
+            ADD COLUMN IF NOT EXISTS pet_weight FLOAT,
+            ADD COLUMN IF NOT EXISTS pickup_time VARCHAR;
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pets (
+                id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR NOT NULL,
+                customer_id VARCHAR NOT NULL,
+                name VARCHAR NOT NULL,
+                breed VARCHAR,
+                weight FLOAT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+        """))
         conn.commit()
     return {"success": True}
 
 @app.post("/admin/rename-tenant")
-def rename_tenant(data: dict):
+def rename_tenant(data: dict, request: Request):
+    _require_admin(request)
     from .database import SessionLocal
     from .models import Tenant
     db = SessionLocal()
     try:
         t = db.query(Tenant).first()
-        if not t: return {"error": "nao encontrado"}
-        t.name = data["name"]; db.commit()
+        if not t:
+            return {"error": "nao encontrado"}
+        t.name = data["name"]
+        db.commit()
         return {"success": True, "name": t.name}
     finally:
         db.close()
