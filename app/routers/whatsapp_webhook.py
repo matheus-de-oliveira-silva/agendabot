@@ -240,6 +240,9 @@ async def whatsapp_webhook(request: Request):
 
         history = json.loads(conversation.messages)
         customer_context = get_customer_context(db, tenant.id, customer.id, customer.name or push_name)
+        # Garante que push_name do WhatsApp sempre chega na IA como nome candidato
+        if not customer_context.get("name") and push_name:
+            customer_context["name"] = push_name
 
         ai_response = chat_with_ai(
             history, message_text, customer_context,
@@ -266,7 +269,17 @@ async def whatsapp_webhook(request: Request):
                     reply_text = "Não consigo agendar para essa data. Pode escolher outro dia?"
             else:
                 slots = get_available_slots(db, tenant.id, date_str, ai_response.get("service", ""))
-                reply_text = format_slots_for_ai(slots, date_str)
+                requested_time = ai_response.get("requested_time", "")
+                if requested_time:
+                    available_times = [s["time"] for s in slots]
+                    if requested_time in available_times:
+                        reply_text = f"__SLOT_OK__{requested_time}__{date_str}"
+                    else:
+                        proximos = available_times[:3] if available_times else []
+                        sugestoes = ", ".join(proximos) if proximos else "nenhum"
+                        reply_text = f"__SLOT_OCUPADO__{requested_time}__{date_str}__{sugestoes}"
+                else:
+                    reply_text = format_slots_for_ai(slots, date_str)
 
         elif action == "create_appointment":
             service_key = ai_response.get("service", "")
@@ -348,6 +361,29 @@ async def whatsapp_webhook(request: Request):
                     reply_text = f"Não consegui cancelar: {result['error']}"
         else:
             reply_text = ai_response.get("message", "Desculpe, não entendi. Pode repetir?")
+
+        # Se reply_text é um marcador interno de slot, fazemos segunda chamada à IA
+        # para ela formular a resposta adequada com contexto
+        if reply_text.startswith("__SLOT_OK__"):
+            parts = reply_text.split("__")
+            slot_time = parts[2]
+            slot_date = parts[3]
+            slot_msg = f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta DISPONIVEL. Confirme esse horario ao cliente e siga para o proximo passo do agendamento."
+            history.append({"role": "user", "content": message_text})
+            ai2 = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
+            reply_text = ai2.get("message", f"Perfeito! O horario das {slot_time} esta disponivel 😊")
+            if ai2.get("action") == "create_appointment":
+                # IA quer criar direto — deixa cair no fluxo normal na próxima mensagem
+                pass
+        elif reply_text.startswith("__SLOT_OCUPADO__"):
+            parts = reply_text.split("__")
+            slot_time = parts[2]
+            slot_date = parts[3]
+            sugestoes = parts[4] if len(parts) > 4 else "nenhum"
+            slot_msg = f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta OCUPADO. Horarios proximos disponiveis: {sugestoes}. Informe o cliente e oferta esses horarios."
+            history.append({"role": "user", "content": message_text})
+            ai2 = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
+            reply_text = ai2.get("message", f"Ops! O horario das {slot_time} esta ocupado. Temos {sugestoes} disponiveis. Qual prefere?")
 
         history.append({"role": "user", "content": message_text})
         history.append({"role": "assistant", "content": reply_text})

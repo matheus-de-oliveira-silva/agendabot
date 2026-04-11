@@ -1,10 +1,8 @@
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-import pytz
-import os
-import json
-import re
+from typing import Optional
+import pytz, os, json, re
 
 load_dotenv()
 
@@ -18,131 +16,155 @@ def agora_brasilia() -> datetime:
 
 def build_services_prompt(services: list) -> str:
     if not services:
-        return "Nenhum serviço cadastrado no momento."
+        return "Nenhum servico cadastrado no momento."
     lines = []
     for s in services:
-        price = f"R$ {s['price']/100:.2f}" if s.get('price') else "Grátis"
-        desc = f" — {s['description']}" if s.get('description') else ""
-        lines.append(f'- "{s["key"]}" -> {s["name"]}: {price}, {s["duration_min"]}min{desc}')
+        price = f"R$ {s['price']/100:.2f}" if s.get("price") else "Gratis"
+        desc  = f" | {s['description']}" if s.get("description") else ""
+        lines.append(f'- chave="{s["key"]}" | nome="{s["name"]}" | {price} | {s["duration_min"]}min{desc}')
     return "\n".join(lines)
 
 
-def build_hours_prompt(tenant_config: dict) -> str:
-    days_map = {
-        "0": "segunda-feira", "1": "terça-feira", "2": "quarta-feira",
-        "3": "quinta-feira", "4": "sexta-feira", "5": "sábado", "6": "domingo"
-    }
-    days_short = {
-        "0": "Seg", "1": "Ter", "2": "Qua",
-        "3": "Qui", "4": "Sex", "5": "Sáb", "6": "Dom"
-    }
-    open_days = [d.strip() for d in (tenant_config.get("open_days") or "0,1,2,3,4,5").split(",")]
-    closed_days = [days_map[d] for d in ["0","1","2","3","4","5","6"] if d not in open_days]
-    open_time = tenant_config.get("open_time") or "09:00"
-    close_time = tenant_config.get("close_time") or "18:00"
-    open_names = [days_short[d] for d in open_days if d in days_short]
-    text = f"{', '.join(open_names)} das {open_time} as {close_time}."
-    if closed_days:
-        text += f" Fechado: {', '.join(closed_days)}."
-    return text
+def build_hours_prompt(cfg: dict) -> str:
+    short = {"0":"Seg","1":"Ter","2":"Qua","3":"Qui","4":"Sex","5":"Sab","6":"Dom"}
+    full  = {"0":"segunda","1":"terca","2":"quarta","3":"quinta","4":"sexta","5":"sabado","6":"domingo"}
+    open_days = [d.strip() for d in (cfg.get("open_days") or "0,1,2,3,4,5").split(",")]
+    closed    = [full[d] for d in "0123456" if d not in open_days]
+    names     = [short[d] for d in open_days if d in short]
+    t = f"{', '.join(names)} das {cfg.get('open_time','09:00')} as {cfg.get('close_time','18:00')}."
+    if closed:
+        t += f" Fechado: {', '.join(closed)}."
+    return t
 
 
+def extract_json_object(text: str) -> Optional[str]:
+    start = text.find("{")
+    if start == -1:
+        return None
+    stack, in_str, esc = 0, False, False
+    for i, ch in enumerate(text[start:], start):
+        if in_str:
+            if esc:   esc = False
+            elif ch == "\\": esc = True
+            elif ch == '"':  in_str = False
+        else:
+            if   ch == '"': in_str = True
+            elif ch == '{': stack += 1
+            elif ch == '}':
+                stack -= 1
+                if stack == 0:
+                    return text[start:i+1]
+    return None
+
+
+# ── Configuração por tipo de negócio ─────────────────────────────────────────
 BUSINESS_CONFIG = {
     "petshop": {
-        "personality": "calorosa, simpatica e descontraida — como uma amiga que trabalha no pet shop e ama animais",
-        "needs_subject_info": True,
-        "subject_fields": ["nome", "raca", "peso"],
+        "emoji": "🐾",
+        "personality": "calorosa, simpatica e amante dos animais — como uma funcionaria do pet shop que conhece cada bichinho",
+        "needs_subject": True,
+        "subject_fields": "nome, raca e peso",
         "needs_pickup": True,
-        "subject_emoji": "🐾",
-        "appointment_fields": "nome do cliente, nome do {subject}, raca, peso, servico, data, hora e horario de busca",
-        "fluxo_extra": "- Apos confirmar horario: colete nome do {subject}, raca e peso\n- Pergunte o horario de busca\n",
         "resumo_subject": True,
         "resumo_pickup": True,
+        "campos_obrigatorios": "customer_name, pet_name, pet_breed, pet_weight, service, datetime, pickup_time",
     },
     "clinica": {
-        "personality": "profissional, empatica e acolhedora — como uma recepcionista de clinica veterinaria experiente",
-        "needs_subject_info": True,
-        "subject_fields": ["nome", "especie/raca", "peso"],
+        "emoji": "🏥",
+        "personality": "profissional, empatica e acolhedora — como recepcionista de clinica veterinaria experiente",
+        "needs_subject": True,
+        "subject_fields": "nome e especie/raca (peso se relevante)",
         "needs_pickup": False,
-        "subject_emoji": "🏥",
-        "appointment_fields": "nome do tutor, nome do {subject}, especie/raca, peso, servico, data e hora",
-        "fluxo_extra": "- Apos confirmar horario: colete nome do {subject}, especie/raca e peso\n- NAO pergunte horario de busca\n",
         "resumo_subject": True,
         "resumo_pickup": False,
+        "campos_obrigatorios": "customer_name, pet_name, pet_breed, service, datetime",
     },
     "adocao": {
-        "personality": "calorosa, amorosa e entusiasmada — como uma voluntaria apaixonada por animais",
-        "needs_subject_info": True,
-        "subject_fields": ["nome", "especie/raca"],
+        "emoji": "❤️",
+        "personality": "calorosa e apaixonada por animais — como voluntaria engajada em adocao responsavel",
+        "needs_subject": True,
+        "subject_fields": "nome e especie/raca do animal",
         "needs_pickup": False,
-        "subject_emoji": "❤️",
-        "appointment_fields": "nome do cliente, nome do {subject}, especie/raca, servico, data e hora",
-        "fluxo_extra": "- Apos confirmar horario: colete nome do {subject} e especie/raca\n- NAO pergunte horario de busca nem peso\n",
         "resumo_subject": True,
         "resumo_pickup": False,
+        "campos_obrigatorios": "customer_name, pet_name, pet_breed, service, datetime",
     },
     "barbearia": {
-        "personality": "descontraida, animada e parceira — como um barbeiro amigo que conhece todo mundo pelo nome",
-        "needs_subject_info": False,
-        "subject_fields": [],
+        "emoji": "💈",
+        "personality": "descontraida e parceira — como barbeiro amigo que ja conhece os clientes pelo nome",
+        "needs_subject": False,
+        "subject_fields": "",
         "needs_pickup": False,
-        "subject_emoji": "💈",
-        "appointment_fields": "nome do cliente, servico, data e hora",
-        "fluxo_extra": "- NAO pergunte sobre pet, raca, peso ou horario de busca\n- O cliente e o proprio sujeito do servico\n- Apos nome + servico + data/hora: vai direto pro resumo\n",
         "resumo_subject": False,
         "resumo_pickup": False,
+        "campos_obrigatorios": "customer_name, service, datetime",
     },
     "salao": {
-        "personality": "animada, fashion e acolhedora — como uma cabeleireira amiga sempre atualizada nas tendencias",
-        "needs_subject_info": False,
-        "subject_fields": [],
+        "emoji": "💅",
+        "personality": "animada e acolhedora — como cabeleireira amiga sempre atualizada nas tendencias",
+        "needs_subject": False,
+        "subject_fields": "",
         "needs_pickup": False,
-        "subject_emoji": "💅",
-        "appointment_fields": "nome do cliente, servico, data e hora",
-        "fluxo_extra": "- NAO pergunte sobre pet, raca, peso ou horario de busca\n- O agendamento e para a propria cliente\n- Apos nome + servico + data/hora: vai direto pro resumo\n",
         "resumo_subject": False,
         "resumo_pickup": False,
+        "campos_obrigatorios": "customer_name, service, datetime",
     },
     "estetica": {
-        "personality": "elegante, tranquila e atenciosa — como uma especialista em bem-estar que valoriza cada cliente",
-        "needs_subject_info": False,
-        "subject_fields": [],
+        "emoji": "🌸",
+        "personality": "elegante e atenciosa — como especialista em bem-estar que valoriza cada cliente",
+        "needs_subject": False,
+        "subject_fields": "",
         "needs_pickup": False,
-        "subject_emoji": "🌸",
-        "appointment_fields": "nome do cliente, servico, data e hora",
-        "fluxo_extra": "- NAO pergunte sobre pet, raca, peso ou horario de busca\n- O agendamento e para a propria cliente\n- Apos nome + servico + data/hora: vai direto pro resumo\n",
         "resumo_subject": False,
         "resumo_pickup": False,
+        "campos_obrigatorios": "customer_name, service, datetime",
     },
     "outro": {
-        "personality": "simpatica, profissional e prestativa — como uma boa recepcionista que conhece bem o negocio",
-        "needs_subject_info": False,
-        "subject_fields": [],
+        "emoji": "📅",
+        "personality": "simpatica e prestativa — como boa recepcionista que conhece bem o negocio",
+        "needs_subject": False,
+        "subject_fields": "",
         "needs_pickup": False,
-        "subject_emoji": "📅",
-        "appointment_fields": "nome do cliente, servico, data e hora",
-        "fluxo_extra": "- NAO pergunte sobre pet, raca, peso ou horario de busca, a nao ser que o servico exija\n- Apos nome + servico + data/hora: vai direto pro resumo\n",
         "resumo_subject": False,
         "resumo_pickup": False,
+        "campos_obrigatorios": "customer_name, service, datetime",
     },
 }
 
-
-def get_business_config(business_type: str) -> dict:
+def get_biz(business_type: str) -> dict:
     return BUSINESS_CONFIG.get(business_type, BUSINESS_CONFIG["outro"])
 
 
-def build_resumo_template(biz_cfg: dict, subject: str) -> str:
-    emoji = biz_cfg["subject_emoji"]
+def build_resumo(biz: dict, subject: str) -> str:
     lines = []
-    if biz_cfg["resumo_subject"]:
-        lines.append(f'{emoji} {subject}: [nome] ([detalhe])')
-    lines.append('👤 Cliente: [nome do cliente]')
-    lines.append('✂️ Servico: [servico] — [preco]')
-    lines.append('📅 [data] as [hora]')
-    if biz_cfg["resumo_pickup"]:
-        lines.append('🏠 Busca: [horario de busca]')
-    return "\n".join(lines) + '\n\nTa certinho assim? 😊'
+    if biz["resumo_subject"]:
+        lines.append(f'{biz["emoji"]} {subject}: [nome] ([detalhe])')
+    lines.append("👤 Cliente: [nome do cliente]")
+    lines.append("✂️ Servico: [servico] — [preco]")
+    lines.append("📅 [data] as [hora]")
+    if biz["resumo_pickup"]:
+        lines.append("🏠 Busca: [horario]")
+    lines.append("\nTa certinho assim? 😊")
+    return "\n".join(lines)
+
+
+def build_create_example(biz: dict, svc_key: str) -> str:
+    base = {
+        "action": "create_appointment",
+        "customer_name": "Joao",
+        "service": svc_key,
+        "datetime": "YYYY-MM-DDTHH:MM:00",
+    }
+    if biz["needs_subject"]:
+        base["pet_name"]   = "Rex"
+        base["pet_breed"]  = "Golden"
+        base["pet_weight"] = 30.0
+    else:
+        base["pet_name"]   = None
+        base["pet_breed"]  = None
+        base["pet_weight"] = None
+    base["pickup_time"] = "HH:MM" if biz["needs_pickup"] else None
+    return json.dumps(base, ensure_ascii=False)
 
 
 def chat_with_ai(
@@ -150,165 +172,165 @@ def chat_with_ai(
     new_message: str,
     customer_context: dict = None,
     tenant_config: dict = None,
-    services: list = None
+    services: list = None,
 ) -> dict:
-    agora = agora_brasilia()
-    data_atual = agora.strftime("%Y-%m-%d")
-    hora_atual = agora.strftime("%H:%M")
-    amanha = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-    dia_semana = ["segunda-feira", "terca-feira", "quarta-feira",
-                  "quinta-feira", "sexta-feira", "sabado", "domingo"][agora.weekday()]
 
-    cfg = tenant_config or {}
-    attendant_name = cfg.get("bot_attendant_name") or "Mari"
-    business_name = cfg.get("bot_business_name") or cfg.get("display_name") or cfg.get("name") or "nosso estabelecimento"
-    business_type = cfg.get("business_type") or "outro"
-    subject = cfg.get("subject_label") or "Cliente"
+    agora        = agora_brasilia()
+    data_hoje    = agora.strftime("%Y-%m-%d")
+    hora_agora   = agora.strftime("%H:%M")
+    data_amanha  = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+    dia_semana   = ["segunda","terca","quarta","quinta","sexta","sabado","domingo"][agora.weekday()]
+
+    cfg            = tenant_config or {}
+    attendant      = cfg.get("bot_attendant_name") or "Mari"
+    biz_name       = cfg.get("bot_business_name") or cfg.get("display_name") or cfg.get("name") or "nosso estabelecimento"
+    biz_type       = cfg.get("business_type") or "outro"
+    subject        = cfg.get("subject_label") or "Cliente"
     subject_plural = cfg.get("subject_label_plural") or "Clientes"
 
-    biz_cfg = get_business_config(business_type)
-    personality = biz_cfg["personality"]
-    appointment_fields = biz_cfg["appointment_fields"].replace("{subject}", subject.lower())
-    fluxo_extra = biz_cfg["fluxo_extra"].replace("{subject}", subject.lower())
+    biz      = get_biz(biz_type)
+    resumo   = build_resumo(biz, subject)
+    svc_key  = (services or [{}])[0].get("key", "servico") if services else "servico"
+    ex_create = build_create_example(biz, svc_key)
 
-    hours_text = build_hours_prompt(cfg)
+    hours_text    = build_hours_prompt(cfg)
     services_text = build_services_prompt(services or [])
 
-    service_keys = ""
-    if services:
-        for s in services:
-            service_keys += f'- "{s["name"]}", variacoes -> use a chave "{s["key"]}"\n'
-
-    cliente_info = ""
-    nome_cliente_conhecido = False
+    # ── Contexto do cliente ───────────────────────────────────────────────────
+    ctx_lines, nome_conhecido = [], False
     if customer_context:
         nome = customer_context.get("name", "")
-        pets = customer_context.get("pets", [])
-        agendamentos_anteriores = customer_context.get("total_appointments", 0)
         if nome:
-            nome_cliente_conhecido = True
-            cliente_info += f"\nNOME DO CLIENTE: {nome}"
-        if pets and biz_cfg["needs_subject_info"]:
-            cliente_info += f"\n{subject_plural.upper()} CONHECIDOS:"
-            for pet in pets:
-                pet_str = f"\n  - {pet['name']}"
-                if pet.get("breed"):
-                    pet_str += f" ({pet['breed']}"
-                    if pet.get("weight"):
-                        pet_str += f", {pet['weight']}kg"
-                    pet_str += ")"
-                cliente_info += pet_str
-        if agendamentos_anteriores > 0:
-            cliente_info += f"\nCLIENTE RECORRENTE: sim ({agendamentos_anteriores} agendamentos anteriores)"
-        else:
-            cliente_info += f"\nCLIENTE RECORRENTE: nao (primeira vez)"
+            nome_conhecido = True
+            ctx_lines.append(f"NOME DO CLIENTE: {nome}")
+        if customer_context.get("pets") and biz["needs_subject"]:
+            ctx_lines.append(f"{subject_plural.upper()} CADASTRADOS:")
+            for p in customer_context["pets"]:
+                s = f"  - {p['name']}"
+                if p.get("breed"): s += f" ({p['breed']}"
+                if p.get("weight"): s += f", {p['weight']}kg"
+                if p.get("breed"): s += ")"
+                ctx_lines.append(s)
+        n = customer_context.get("total_appointments", 0)
+        ctx_lines.append(f"RECORRENTE: {'sim (' + str(n) + ' agendamentos)' if n > 0 else 'nao (primeira vez)'}")
 
-    nome_status = "JA CONHECIDO" if nome_cliente_conhecido else "DESCONHECIDO — pergunte na primeira resposta"
-    example_service_key = services[0]["key"] if services else "servico"
-    resumo_template = build_resumo_template(biz_cfg, subject)
+    ctx_block   = "\n".join(ctx_lines) if ctx_lines else "Nenhum dado previo."
+    nome_status = "JA SABEMOS O NOME" if nome_conhecido else "NOME DESCONHECIDO — pergunte antes de qualquer acao"
 
-    # Regra de campos obrigatorios
-    if biz_cfg["needs_subject_info"]:
-        regra_campos = f"5. So chame create_appointment com TODOS os dados: {appointment_fields}."
+    # ── Regras especificas do negocio ─────────────────────────────────────────
+    if biz["needs_subject"]:
+        regra_subject = (
+            f"COLETA DE DADOS DO {subject.upper()}: apos confirmar horario, colete {biz['subject_fields']} do {subject.lower()}."
+        )
+        regra_campos = (
+            f"Campos obrigatorios para create_appointment: {biz['campos_obrigatorios']}. "
+            f"Nao crie o agendamento sem todos esses dados."
+        )
     else:
-        regra_campos = "5. So chame create_appointment com: nome do cliente, servico, data e hora. Envie pet_name=null, pet_breed=null, pet_weight=null, pickup_time=null."
+        regra_subject = (
+            f"NAO pergunte sobre pet, raca, peso ou animal. "
+            f"O cliente e o proprio sujeito. Campos pet_name/pet_breed/pet_weight devem ser null."
+        )
+        regra_campos = (
+            f"Campos obrigatorios para create_appointment: {biz['campos_obrigatorios']}. "
+            f"pet_name=null, pet_breed=null, pet_weight=null."
+        )
 
-    pickup_regra = "" if biz_cfg["needs_pickup"] else "9. NAO pergunte horario de busca — este tipo de negocio nao usa esse campo.\n"
-
-    # Exemplo de create_appointment adaptado
-    if biz_cfg["needs_subject_info"] and biz_cfg["needs_pickup"]:
-        create_example = f'{{"action": "create_appointment", "customer_name": "Joao", "pet_name": "Rex", "pet_breed": "Golden Retriever", "pet_weight": 30.0, "service": "{example_service_key}", "datetime": "YYYY-MM-DDTHH:MM:00", "pickup_time": "HH:MM"}}'
-    elif biz_cfg["needs_subject_info"]:
-        create_example = f'{{"action": "create_appointment", "customer_name": "Joao", "pet_name": "Rex", "pet_breed": "Golden Retriever", "pet_weight": 30.0, "service": "{example_service_key}", "datetime": "YYYY-MM-DDTHH:MM:00", "pickup_time": null}}'
+    if biz["needs_pickup"]:
+        regra_pickup = f"Pergunte o horario de busca (quando o cliente quer que busquem o {subject.lower()})."
     else:
-        create_example = f'{{"action": "create_appointment", "customer_name": "Joao", "pet_name": null, "pet_breed": null, "pet_weight": null, "service": "{example_service_key}", "datetime": "YYYY-MM-DDTHH:MM:00", "pickup_time": null}}'
+        regra_pickup = "NAO pergunte horario de busca. pickup_time=null sempre."
 
-    system_prompt = f"""Voce e {attendant_name}, atendente virtual de {business_name}. Sua personalidade e {personality}. Converse de forma natural no WhatsApp, sem parecer robotica.
+    system_prompt = f"""Voce e {attendant}, atendente virtual de {biz_name}.
+Personalidade: {biz["personality"]}.
+Converse de forma natural pelo WhatsApp — seja humana, nunca robotica.
 
-HOJE: {data_atual} ({dia_semana}) — HORA: {hora_atual} (Brasilia)
-AMANHA: {amanha}
-{cliente_info}
+=== CONTEXTO ATUAL ===
+Data: {data_hoje} ({dia_semana}) | Hora: {hora_agora} | Amanha: {data_amanha}
+{ctx_block}
+Nome do cliente: {nome_status}
 
-STATUS DO NOME DO CLIENTE: {nome_status}
+=== REGRAS ABSOLUTAS — NUNCA QUEBRE ===
 
-REGRAS ABSOLUTAS (nunca viole):
-1. NOME DO CLIENTE: Se DESCONHECIDO, peca o nome PRIMEIRO. Se o cliente ja mandou servico + data + horario tudo junto, peca o nome E ja chame check_availability.
-2. HORARIO ESPECIFICO: Se o cliente pediu um horario especifico (ex: "as 10h"), chame check_availability e se disponivel, va DIRETO ao proximo passo.
-3. NUNCA invente horarios ou precos — use sempre check_availability e os servicos listados abaixo.
-4. Se o cliente ja informou dados na mensagem, NAO pergunte de novo.
+REGRA 1 — NOME:
+- Se nome DESCONHECIDO: a PRIMEIRA coisa e pedir o nome. Sem excecoes.
+- Se o cliente mandar servico+data+hora tudo junto mas nome desconhecido: peca o nome E ja dispare check_availability em paralelo na mesma resposta.
+- NUNCA crie agendamento sem saber o nome real do cliente.
+- NUNCA use "[Nome do Cliente]" no resumo. Use o nome real coletado.
+
+REGRA 2 — HORARIO ESPECIFICO (CRITICA):
+- Se o cliente pediu um horario ESPECIFICO (ex: "as 10h", "as 13:00", "10 horas"):
+  * Chame check_availability para VERIFICAR se esta disponivel
+  * Se disponivel: confirme esse horario especifico e siga para o proximo passo
+  * Se ocupado: informe e oferta alternativas proximas
+  * NUNCA liste todos os horarios quando o cliente ja pediu um especifico
+- Se o cliente NAO pediu horario especifico: chame check_availability e mostre os horarios disponiveis
+
+REGRA 3 — NAO REPITA PERGUNTAS:
+- Se o cliente ja respondeu um campo, use essa resposta. Nao pergunte de novo.
+- Se falta apenas 1 dado, pergunte so esse dado em frase curta.
+- Se ja tem servico+data+horario+nome: va direto para coleta de dados especificos (se necessario) ou resumo.
+
+REGRA 4 — DADOS ESPECIFICOS DESTE NEGOCIO:
+{regra_subject}
+{regra_pickup}
+
+REGRA 5 — CAMPOS OBRIGATORIOS:
 {regra_campos}
-6. Confirme o resumo completo ANTES de criar o agendamento e peca confirmacao explicita.
-7. Fale SOMENTE sobre servicos deste estabelecimento.
-8. NOME NO RESUMO: Em customer_name use o nome real coletado. NUNCA deixe vazio.
-{pickup_regra}
-PERSONALIDADE E TOM:
-- Seja quente e proxima, como uma atendente humana real
-- Use o nome do cliente quando souber
-- Use emojis com naturalidade, sem exagero (2-3 por mensagem)
-- Para clientes recorrentes: demonstre que reconhece
-- Quando buscar horarios: "Um segundinho, vou verificar a agenda!"
-- Use contracoes naturais: "ta", "pra", "vc"
 
-FERIADOS NACIONAIS 2026:
-01/01 Ano Novo | 16-17/02 Carnaval | 03/04 Sexta Santa | 21/04 Tiradentes
-01/05 Dia do Trabalho | 04/06 Corpus Christi | 07/09 Independencia
-12/10 N.Sra.Aparecida | 02/11 Finados | 15/11 Republica | 25/12 Natal
+REGRA 6 — RESUMO E CONFIRMACAO:
+- Sempre mostre o resumo completo e peca confirmacao ANTES de criar.
+- Modelo do resumo:
+{resumo}
 
-HORARIO DE FUNCIONAMENTO:
+REGRA 7 — ESCOPO:
+- Fale SOMENTE sobre servicos deste estabelecimento.
+- Se o cliente falar de outro assunto, responda educadamente que so faz agendamentos.
+
+=== TOM E PERSONALIDADE ===
+- Use o nome do cliente quando souber: "Oi Joao!", "Perfeito, Joao!"
+- Emojis naturais, sem exagero (2-3 por mensagem)
+- Clientes recorrentes: demonstre que reconhece ("Que saudade! 😊")
+- Quando verificar agenda: "Um segundinho! 🗓️"
+- Linguagem: "ta", "pra", "vc", "tbm" — natural mas sem exagerar
+- Seja direta: se falta apenas 1 dado, pergunte so esse dado
+
+=== FERIADOS 2026 ===
+01/01 | 16-17/02 Carnaval | 03/04 Sexta Santa | 21/04 Tiradentes
+01/05 | 04/06 Corpus Christi | 07/09 Independencia | 12/10 N.Sra.Aparecida
+02/11 Finados | 15/11 Republica | 25/12 Natal
+
+=== FUNCIONAMENTO ===
 {hours_text}
 
-SERVICOS DISPONIVEIS (use EXATAMENTE as chaves indicadas):
+=== SERVICOS (use EXATAMENTE as chaves) ===
 {services_text}
 
-IDENTIFICACAO DE SERVICO:
-{service_keys}
+=== ACOES — RESPONDA SEMPRE EM JSON PURO ===
 
-FLUXO DO AGENDAMENTO:
-CENARIO A — Cliente manda tudo junto:
-  1. Se nome desconhecido: peca o nome E chame check_availability
-  2. Com horario disponivel: confirme e siga para coleta de dados necessarios
-  3. Mostre RESUMO COMPLETO e peca confirmacao
-  4. Cliente confirma -> create_appointment
+Verificar disponibilidade (cliente NAO pediu horario especifico):
+{{"action":"check_availability","date":"YYYY-MM-DD","service":"{svc_key}"}}
 
-CENARIO B — Cliente so diz "quero agendar":
-  1. Nome desconhecido -> peca o nome
-  2. Pergunte servico + data
-  3. Chame check_availability -> mostre horarios disponiveis
-  4. Cliente escolhe horario -> colete dados necessarios
-  5. Mostre RESUMO COMPLETO e peca confirmacao
-  6. Cliente confirma -> create_appointment
+Verificar horario especifico (cliente pediu "as 10h", "as 13:00" etc):
+{{"action":"check_availability","date":"YYYY-MM-DD","service":"{svc_key}","requested_time":"HH:MM"}}
 
-REGRAS ESPECIFICAS DESTE TIPO DE NEGOCIO:
-{fluxo_extra}
+Criar agendamento:
+{ex_create}
 
-RESUMO FINAL (use este modelo):
-"Perfeito! Confirma pra mim:
+Listar agendamentos do cliente:
+{{"action":"list_appointments"}}
 
-{resumo_template}"
+Cancelar agendamento:
+{{"action":"cancel_appointment","appointment_index":1}}
 
-ACOES — responda SEMPRE em JSON puro:
+Resposta normal:
+{{"action":"reply","message":"texto aqui"}}
 
-Para verificar disponibilidade:
-{{"action": "check_availability", "date": "YYYY-MM-DD", "service": "{example_service_key}"}}
-
-Para criar agendamento:
-{create_example}
-
-Para listar agendamentos:
-{{"action": "list_appointments"}}
-
-Para cancelar:
-{{"action": "cancel_appointment", "appointment_index": 1}}
-
-Para responder normalmente:
-{{"action": "reply", "message": "texto da resposta aqui"}}
-
-IMPORTANTE:
-- Responda SEMPRE em JSON puro, sem markdown, sem texto fora do JSON
-- "service": use APENAS as chaves listadas em SERVICOS DISPONIVEIS
-- "pet_weight": numero decimal em kg (null se nao aplicavel)
-- "pickup_time": string "HH:MM" (null se nao aplicavel a este negocio)
-- "pet_name", "pet_breed": null se o tipo de negocio nao exige
+=== REGRAS DO JSON ===
+- SEMPRE JSON puro — sem markdown, sem texto fora do JSON, sem aspas extras
+- "service": use APENAS as chaves listadas nos servicos
+- "datetime": formato exato "YYYY-MM-DDTHH:MM:00"
+- Campos null quando nao aplicavel ao tipo de negocio
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -318,64 +340,18 @@ IMPORTANTE:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        temperature=0.7,
+        temperature=0.3,
         max_tokens=900,
     )
 
-    ai_text = response.choices[0].message.content.strip()
-    ai_text = re.sub(r'```json\s*', '', ai_text)
-    ai_text = re.sub(r'```\s*', '', ai_text)
-    ai_text = ai_text.strip()
+    raw = response.choices[0].message.content.strip()
+    raw = re.sub(r"```json\s*", "", raw)
+    raw = re.sub(r"```\s*", "", raw).strip()
 
-    json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
-    if json_match:
+    json_str = extract_json_object(raw)
+    if json_str:
         try:
-            result = json.loads(json_match.group())
+            return json.loads(json_str)
         except json.JSONDecodeError:
-            result = {"action": "reply", "message": ai_text}
-    else:
-        result = {"action": "reply", "message": ai_text}
-
-    return result
-
-
-def test_ai():
-    print("Testando conexao com OpenAI...")
-
-    fake_services_pet = [
-        {"key": "banho_tosa", "name": "Banho e Tosa", "price": 7000, "duration_min": 90, "description": "Banho completo com tosa"},
-    ]
-    fake_config_pet = {
-        "bot_attendant_name": "Mari",
-        "bot_business_name": "PetShop Teste",
-        "business_type": "petshop",
-        "open_days": "0,1,2,3,4,5",
-        "open_time": "09:00",
-        "close_time": "18:00",
-        "subject_label": "Pet",
-        "subject_label_plural": "Pets",
-    }
-    print("\n--- TESTE PETSHOP ---")
-    r = chat_with_ai([], "Oi, quero banho e tosa pro meu golden amanha as 10h", tenant_config=fake_config_pet, services=fake_services_pet)
-    print(f"Bot: {r}")
-
-    fake_services_barb = [
-        {"key": "corte_barba", "name": "Corte + Barba", "price": 6500, "duration_min": 50, "description": "Combo completo"},
-    ]
-    fake_config_barb = {
-        "bot_attendant_name": "Leo",
-        "bot_business_name": "Barbearia do Joao",
-        "business_type": "barbearia",
-        "open_days": "1,2,3,4,5,6",
-        "open_time": "09:00",
-        "close_time": "19:00",
-        "subject_label": "Cliente",
-        "subject_label_plural": "Clientes",
-    }
-    print("\n--- TESTE BARBEARIA ---")
-    r2 = chat_with_ai([], "Oi quero cortar o cabelo e fazer a barba amanha as 14h", tenant_config=fake_config_barb, services=fake_services_barb)
-    print(f"Bot: {r2}")
-
-
-if __name__ == "__main__":
-    test_ai()
+            pass
+    return {"action": "reply", "message": raw}
