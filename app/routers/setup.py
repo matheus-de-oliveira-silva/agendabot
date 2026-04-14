@@ -472,7 +472,7 @@ def setup_step4(request: Request, token: str = "", db: Session = Depends(get_db)
   <div class="card-sub">Informe o nome da instância da Evolution API que você criou para este negócio. O bot usará esse número para conversar com seus clientes.</div>
 
   <div class="alert alert-info" style="margin-bottom:20px">
-    💡 <strong>Não sabe o que é isso?</strong> Você precisa ter a Evolution API instalada e uma instância criada. Peça ajuda ao suporte ou assista ao tutorial em vídeo.
+    💡 <strong>Não sabe o que é isso?</strong> Você precisa ter a Evolution API instalada e uma instância criada. Peça ajuda ao suporte se não souber como fazer.
   </div>
 
   <div class="form-group">
