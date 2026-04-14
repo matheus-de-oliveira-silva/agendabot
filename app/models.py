@@ -38,8 +38,21 @@ class Tenant(Base):
     close_time = Column(String, default="18:00")
 
     # Notificação para o dono
-    owner_phone = Column(String, nullable=True)          # ← NOVO: WhatsApp do dono para notificações
-    notify_new_appt = Column(Boolean, default=True)      # ← NOVO: notificar quando bot agendar
+    owner_phone     = Column(String, nullable=True)
+    notify_new_appt = Column(Boolean, default=True)
+
+    # Endereço (busca / entrega)
+    needs_address = Column(Boolean, default=False)                        # coleta endereço do cliente?
+    address_label = Column(String, default="Endereço de busca")           # label exibido no painel e no bot
+
+    # Onboarding self-service
+    setup_token = Column(String, nullable=True)   # token temporário do link /setup — anulado após uso
+    setup_done  = Column(Boolean, default=False)  # True quando o cliente concluiu o wizard
+
+    # Plano SaaS
+    plan        = Column(String, default="basico")  # "basico" | "pro" | "agencia"
+    plan_active = Column(Boolean, default=True)     # False = assinatura cancelada, bot pausado
+    billing_email = Column(String, nullable=True)   # email do comprador na Hotmart/Kiwify
 
 
 class Customer(Base):
@@ -90,8 +103,9 @@ class Appointment(Base):
     pet_name = Column(String)
     pet_breed = Column(String)
     pet_weight = Column(Float)
-    scheduled_at = Column(DateTime, nullable=False)
-    pickup_time = Column(String)
+    scheduled_at  = Column(DateTime, nullable=False)
+    pickup_time   = Column(String)
+    pickup_address = Column(String, nullable=True)  # endereço de busca/entrega (quando needs_address=True)
     status = Column(String, default="confirmed")
     notes = Column(Text)
     created_at = Column(DateTime, server_default=func.now())

@@ -135,7 +135,8 @@ def get_biz(business_type: str) -> dict:
     return BUSINESS_CONFIG.get(business_type, BUSINESS_CONFIG["outro"])
 
 
-def build_resumo(biz: dict, subject: str) -> str:
+def build_resumo(biz: dict, subject: str, needs_address: bool, address_label: str) -> str:
+    """Monta o template de resumo de acordo com as configurações do tenant."""
     lines = []
     if biz["resumo_subject"]:
         lines.append(f'{biz["emoji"]} {subject}: [nome] ([detalhe])')
@@ -144,11 +145,14 @@ def build_resumo(biz: dict, subject: str) -> str:
     lines.append("📅 [data] as [hora]")
     if biz["resumo_pickup"]:
         lines.append("🏠 Busca: [horario]")
+    if needs_address:
+        lines.append(f"📍 {address_label}: [endereco completo]")
     lines.append("\nTa certinho assim? 😊")
     return "\n".join(lines)
 
 
-def build_create_example(biz: dict, svc_key: str) -> str:
+def build_create_example(biz: dict, svc_key: str, needs_address: bool) -> str:
+    """Monta o exemplo de JSON create_appointment com pickup_address quando aplicável."""
     base = {
         "action": "create_appointment",
         "customer_name": "Joao",
@@ -163,7 +167,8 @@ def build_create_example(biz: dict, svc_key: str) -> str:
         base["pet_name"]   = None
         base["pet_breed"]  = None
         base["pet_weight"] = None
-    base["pickup_time"] = "HH:MM" if biz["needs_pickup"] else None
+    base["pickup_time"]    = "HH:MM" if biz["needs_pickup"] else None
+    base["pickup_address"] = "Rua Exemplo, 123 — Bairro" if needs_address else None
     return json.dumps(base, ensure_ascii=False)
 
 
@@ -188,10 +193,14 @@ def chat_with_ai(
     subject        = cfg.get("subject_label") or "Cliente"
     subject_plural = cfg.get("subject_label_plural") or "Clientes"
 
-    biz      = get_biz(biz_type)
-    resumo   = build_resumo(biz, subject)
-    svc_key  = (services or [{}])[0].get("key", "servico") if services else "servico"
-    ex_create = build_create_example(biz, svc_key)
+    # ── Campos de endereço vindos do tenant_config ────────────────────────────
+    needs_address = bool(cfg.get("needs_address", False))
+    address_label = cfg.get("address_label") or "Endereço de busca"
+
+    biz       = get_biz(biz_type)
+    resumo    = build_resumo(biz, subject, needs_address, address_label)
+    svc_key   = (services or [{}])[0].get("key", "servico") if services else "servico"
+    ex_create = build_create_example(biz, svc_key, needs_address)
 
     hours_text    = build_hours_prompt(cfg)
     services_text = build_services_prompt(services or [])
@@ -217,29 +226,47 @@ def chat_with_ai(
     ctx_block   = "\n".join(ctx_lines) if ctx_lines else "Nenhum dado previo."
     nome_status = "JA SABEMOS O NOME" if nome_conhecido else "NOME DESCONHECIDO — pergunte antes de qualquer acao"
 
-    # ── Regras especificas do negocio ─────────────────────────────────────────
+    # ── Regras específicas do negócio ─────────────────────────────────────────
     if biz["needs_subject"]:
         regra_subject = (
             f"COLETA DE DADOS DO {subject.upper()}: apos confirmar horario, colete {biz['subject_fields']} do {subject.lower()}."
         )
-        regra_campos = (
-            f"Campos obrigatorios para create_appointment: {biz['campos_obrigatorios']}. "
-            f"Nao crie o agendamento sem todos esses dados."
-        )
+        campos_obrigatorios = biz["campos_obrigatorios"]
     else:
         regra_subject = (
             f"NAO pergunte sobre pet, raca, peso ou animal. "
             f"O cliente e o proprio sujeito. Campos pet_name/pet_breed/pet_weight devem ser null."
         )
-        regra_campos = (
-            f"Campos obrigatorios para create_appointment: {biz['campos_obrigatorios']}. "
-            f"pet_name=null, pet_breed=null, pet_weight=null."
-        )
+        campos_obrigatorios = biz["campos_obrigatorios"]
+
+    if needs_address:
+        campos_obrigatorios += ", pickup_address"
+
+    regra_campos = (
+        f"Campos obrigatorios para create_appointment: {campos_obrigatorios}. "
+        f"Nao crie o agendamento sem todos esses dados."
+    )
 
     if biz["needs_pickup"]:
         regra_pickup = f"Pergunte o horario de busca (quando o cliente quer que busquem o {subject.lower()})."
     else:
         regra_pickup = "NAO pergunte horario de busca. pickup_time=null sempre."
+
+    # ── Regra de endereço (condicional) ───────────────────────────────────────
+    if needs_address:
+        regra_address = (
+            f"COLETA DE ENDERECO (OBRIGATORIA): apos confirmar o horario "
+            f"(e horario de busca se aplicavel), pergunte o endereco completo do cliente. "
+            f"Use o label '{address_label}' na pergunta. "
+            f"Exemplo: 'Qual o {address_label.lower()}? 📍 (rua, numero e bairro)'. "
+            f"Inclua no JSON: \"pickup_address\": \"[endereco informado]\". "
+            f"Mostre no resumo como: 📍 {address_label}: [endereco]. "
+            f"NUNCA crie o agendamento sem o endereco quando needs_address=true."
+        )
+    else:
+        regra_address = (
+            "NAO pergunte endereco ao cliente. pickup_address=null sempre."
+        )
 
     system_prompt = f"""Voce e {attendant}, atendente virtual de {biz_name}.
 Personalidade: {biz["personality"]}.
@@ -275,15 +302,18 @@ REGRA 4 — DADOS ESPECIFICOS DESTE NEGOCIO:
 {regra_subject}
 {regra_pickup}
 
-REGRA 5 — CAMPOS OBRIGATORIOS:
+REGRA 5 — ENDERECO:
+{regra_address}
+
+REGRA 6 — CAMPOS OBRIGATORIOS:
 {regra_campos}
 
-REGRA 6 — RESUMO E CONFIRMACAO:
+REGRA 7 — RESUMO E CONFIRMACAO:
 - Sempre mostre o resumo completo e peca confirmacao ANTES de criar.
 - Modelo do resumo:
 {resumo}
 
-REGRA 7 — ESCOPO:
+REGRA 8 — ESCOPO:
 - Fale SOMENTE sobre servicos deste estabelecimento.
 - Se o cliente falar de outro assunto, responda educadamente que so faz agendamentos.
 
@@ -330,6 +360,7 @@ Resposta normal:
 - SEMPRE JSON puro — sem markdown, sem texto fora do JSON, sem aspas extras
 - "service": use APENAS as chaves listadas nos servicos
 - "datetime": formato exato "YYYY-MM-DDTHH:MM:00"
+- "pickup_address": endereco completo informado pelo cliente, ou null se nao aplicavel
 - Campos null quando nao aplicavel ao tipo de negocio
 """
 

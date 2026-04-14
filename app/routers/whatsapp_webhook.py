@@ -35,19 +35,24 @@ def get_tenant_services(db, tenant_id: str) -> list:
         })
     return result
 
+
 def get_tenant_config(tenant) -> dict:
     return {
-        "bot_attendant_name": getattr(tenant, 'bot_attendant_name', None) or "Mari",
-        "bot_business_name": getattr(tenant, 'bot_business_name', None) or tenant.display_name or tenant.name,
-        "display_name": tenant.display_name or tenant.name,
-        "name": tenant.name,
-        "business_type": getattr(tenant, 'business_type', None) or "outro",
-        "subject_label": getattr(tenant, 'subject_label', None) or "Cliente",
-        "subject_label_plural": getattr(tenant, 'subject_label_plural', None) or "Clientes",
-        "open_days": getattr(tenant, 'open_days', None) or "0,1,2,3,4,5",
-        "open_time": getattr(tenant, 'open_time', None) or "09:00",
-        "close_time": getattr(tenant, 'close_time', None) or "18:00",
+        "bot_attendant_name":  getattr(tenant, 'bot_attendant_name', None) or "Mari",
+        "bot_business_name":   getattr(tenant, 'bot_business_name', None) or tenant.display_name or tenant.name,
+        "display_name":        tenant.display_name or tenant.name,
+        "name":                tenant.name,
+        "business_type":       getattr(tenant, 'business_type', None) or "outro",
+        "subject_label":       getattr(tenant, 'subject_label', None) or "Cliente",
+        "subject_label_plural":getattr(tenant, 'subject_label_plural', None) or "Clientes",
+        "open_days":           getattr(tenant, 'open_days', None) or "0,1,2,3,4,5",
+        "open_time":           getattr(tenant, 'open_time', None) or "09:00",
+        "close_time":          getattr(tenant, 'close_time', None) or "18:00",
+        # ── Etapa 5: endereço ──────────────────────────────────────────────
+        "needs_address":       bool(getattr(tenant, 'needs_address', False)),
+        "address_label":       getattr(tenant, 'address_label', None) or "Endereço de busca",
     }
+
 
 def find_service_by_key(services: list, key: str):
     for s in services:
@@ -57,6 +62,7 @@ def find_service_by_key(services: list, key: str):
         if key in s["key"] or s["key"] in key:
             return s
     return services[0] if services else None
+
 
 def check_business_hours_dynamic(tenant_config: dict, date_str: str) -> dict:
     try:
@@ -73,6 +79,7 @@ def check_business_hours_dynamic(tenant_config: dict, date_str: str) -> dict:
     except:
         return {"open": False, "reason": "invalid_date"}
 
+
 def get_customer_context(db, tenant_id, customer_id, customer_name) -> dict:
     pets = db.query(Pet).filter(Pet.tenant_id == tenant_id, Pet.customer_id == customer_id).all()
     total = db.query(Appointment).filter(
@@ -86,25 +93,15 @@ def get_customer_context(db, tenant_id, customer_id, customer_name) -> dict:
         "total_appointments": total
     }
 
+
 def should_reset_conversation(conversation) -> bool:
     if not conversation.updated_at:
         return False
     agora = datetime.now(BRASILIA).replace(tzinfo=None)
     return (agora - conversation.updated_at) > timedelta(hours=24)
 
+
 def _find_tenant_for_whatsapp(db, body: dict):
-    """
-    Descobre qual tenant deve receber a mensagem.
-
-    Estratégia (em ordem de prioridade):
-    1. Tenta achar pelo instance name da Evolution API (campo 'instance')
-       mapeado pelo phone_number_id configurado no tenant.
-    2. Tenta pelo número de destino da mensagem (campo 'to' ou 'destination').
-    3. Fallback: se só existe 1 tenant com bot ativo, usa ele.
-       Se houver mais de 1, rejeita (não dá pra adivinhar).
-    """
-
-    # Tenta extrair o instance name do payload da Evolution API
     instance_name = (
         body.get("instance")
         or body.get("instanceName")
@@ -112,7 +109,6 @@ def _find_tenant_for_whatsapp(db, body: dict):
         or ""
     )
 
-    # Tenta achar por phone_number_id = instance_name
     if instance_name:
         tenant = db.query(Tenant).filter(
             Tenant.phone_number_id == instance_name,
@@ -121,20 +117,12 @@ def _find_tenant_for_whatsapp(db, body: dict):
         if tenant:
             return tenant
 
-    # Tenta pelo número de destino (alguns payloads trazem o número do bot)
-    destination = (
-        body.get("destination")
-        or body.get("to")
-        or body.get("data", {}).get("key", {}).get("remoteJid", "").split("@")[0]
-    )
-
-    # Fallback seguro: só usa .first() se houver exatamente 1 tenant ativo
     tenants_ativos = db.query(Tenant).filter(Tenant.bot_active == True).all()
     if len(tenants_ativos) == 1:
         return tenants_ativos[0]
 
-    # Mais de 1 tenant e não conseguiu identificar — rejeita
     return None
+
 
 async def send_whatsapp_message(phone: str, text: str):
     if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
@@ -148,8 +136,8 @@ async def send_whatsapp_message(phone: str, text: str):
         except Exception as e:
             print(f"[WhatsApp] Erro ao enviar mensagem: {e}")
 
+
 async def send_whatsapp_message_for_tenant(phone: str, text: str, tenant):
-    """Envia mensagem usando as credenciais do tenant correto."""
     instance = getattr(tenant, 'phone_number_id', None) or EVOLUTION_INSTANCE
     if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
         print(f"[WhatsApp:{instance}] Sem Evolution configurada. Msg para {phone}: {text[:50]}...")
@@ -192,10 +180,9 @@ async def whatsapp_webhook(request: Request):
 
     db = SessionLocal()
     try:
-        # ── Isolamento por tenant ──────────────────────────────────────────
         tenant = _find_tenant_for_whatsapp(db, body)
         if not tenant:
-            print(f"[WhatsApp] Tenant não identificado para mensagem de {customer_phone}. Body keys: {list(body.keys())}")
+            print(f"[WhatsApp] Tenant não identificado para {customer_phone}. Body keys: {list(body.keys())}")
             return {"status": "tenant_not_found"}
 
         if not getattr(tenant, 'bot_active', True):
@@ -209,7 +196,6 @@ async def whatsapp_webhook(request: Request):
         tenant_config = get_tenant_config(tenant)
         services = get_tenant_services(db, tenant.id)
 
-        # Cliente sempre vinculado ao tenant correto
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
             Customer.phone == customer_phone
@@ -223,7 +209,6 @@ async def whatsapp_webhook(request: Request):
             customer.name = push_name
             db.commit()
 
-        # Conversa sempre vinculada ao tenant correto
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id == tenant.id,
             Conversation.customer_phone == customer_phone
@@ -240,7 +225,6 @@ async def whatsapp_webhook(request: Request):
 
         history = json.loads(conversation.messages)
         customer_context = get_customer_context(db, tenant.id, customer.id, customer.name or push_name)
-        # Garante que push_name do WhatsApp sempre chega na IA como nome candidato
         if not customer_context.get("name") and push_name:
             customer_context["name"] = push_name
 
@@ -257,7 +241,7 @@ async def whatsapp_webhook(request: Request):
             check = check_business_hours_dynamic(tenant_config, date_str)
             if not check["open"]:
                 reason = check.get("reason", "")
-                open_t = tenant_config.get("open_time", "09:00")
+                open_t  = tenant_config.get("open_time", "09:00")
                 close_t = tenant_config.get("close_time", "18:00")
                 if reason == "closed_day":
                     reply_text = f"😔 Nesse dia não funcionamos!\n\nFuncionamos {open_t} às {close_t}.\nPosso verificar outro dia? 😊"
@@ -292,40 +276,55 @@ async def whatsapp_webhook(request: Request):
                     reply_text = "Serviço não encontrado. Pode escolher outro?"
                 else:
                     customer_name_ai = ai_response.get("customer_name", "")
-                    # Usa o nome da IA, ou o nome já salvo no banco, ou o pushName do WhatsApp
                     nome_final = customer_name_ai or customer.name or push_name or ""
                     if nome_final and not customer.name:
                         customer.name = nome_final
                         db.commit()
-                    # Garante que customer_name nunca vai vazio no JSON
                     if not ai_response.get("customer_name") and nome_final:
                         ai_response["customer_name"] = nome_final
 
+                    # ── Etapa 5: captura endereço da resposta da IA ────────
+                    pickup_address = ai_response.get("pickup_address") or None
+
                     result = create_appointment(
-                        db=db, tenant_id=tenant.id, customer_id=customer.id,
+                        db=db,
+                        tenant_id=tenant.id,
+                        customer_id=customer.id,
                         service_id=service_obj.id,
                         datetime_str=ai_response.get("datetime", ""),
                         pet_name=ai_response.get("pet_name"),
                         pet_breed=ai_response.get("pet_breed"),
                         pet_weight=ai_response.get("pet_weight"),
                         pickup_time=ai_response.get("pickup_time"),
+                        pickup_address=pickup_address,   # ← NOVO
                     )
+
                     price_fmt = f"R$ {svc_data['price']/100:.2f}" if svc_data.get('price') else ""
-                    subject = tenant_config.get("subject_label", "Pet")
+                    subject   = tenant_config.get("subject_label", "Pet")
+
                     if result["success"]:
                         pet_info = ai_response.get("pet_name", f"seu {subject.lower()}")
                         if ai_response.get("pet_breed"):
                             pet_info += f" ({ai_response['pet_breed']})"
                         pickup = f"\n🏠 Busca: {ai_response['pickup_time']}" if ai_response.get("pickup_time") else ""
+
+                        # ── Linha de endereço condicional (LGPD: só exibe para o cliente dono) ──
+                        if pickup_address:
+                            label = tenant_config.get("address_label", "Endereço")
+                            address_line = f"\n📍 {label}: {pickup_address}"
+                        else:
+                            address_line = ""
+
                         reply_text = (
                             f"✅ Agendamento confirmado!\n\n"
                             f"🐾 {subject}: {pet_info}\n"
                             f"✂️ Serviço: {service_obj.name}{' — ' + price_fmt if price_fmt else ''}\n"
                             f"📅 Data: {result['scheduled_at']}"
-                            f"{pickup}\n\n"
+                            f"{pickup}"
+                            f"{address_line}\n\n"
                             f"Até lá! Qualquer dúvida é só chamar. 😊"
                         )
-                        # Notifica o dono do negócio
+
                         appt_obj = db.query(Appointment).filter(Appointment.id == result["appointment_id"]).first()
                         if appt_obj:
                             await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
@@ -359,22 +358,19 @@ async def whatsapp_webhook(request: Request):
                     reply_text = f"✅ Agendamento de {appt['scheduled_at']} cancelado com sucesso!"
                 else:
                     reply_text = f"Não consegui cancelar: {result['error']}"
+
         else:
             reply_text = ai_response.get("message", "Desculpe, não entendi. Pode repetir?")
 
-        # Se reply_text é um marcador interno de slot, fazemos segunda chamada à IA
-        # para ela formular a resposta adequada com contexto
+        # ── Segunda chamada à IA para slots específicos ────────────────────
         if reply_text.startswith("__SLOT_OK__"):
             parts = reply_text.split("__")
-            slot_time = parts[2]
-            slot_date = parts[3]
+            slot_time, slot_date = parts[2], parts[3]
             slot_msg = f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta DISPONIVEL. Confirme esse horario ao cliente e siga para o proximo passo do agendamento."
             history.append({"role": "user", "content": message_text})
             ai2 = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
             reply_text = ai2.get("message", f"Perfeito! O horario das {slot_time} esta disponivel 😊")
-            if ai2.get("action") == "create_appointment":
-                # IA quer criar direto — deixa cair no fluxo normal na próxima mensagem
-                pass
+
         elif reply_text.startswith("__SLOT_OCUPADO__"):
             parts = reply_text.split("__")
             slot_time = parts[2]

@@ -72,10 +72,6 @@ def check_business_hours_for_tenant(db: Session, tenant_id: str, date_str: str) 
 
 
 def get_available_slots(db: Session, tenant_id: str, date_str: str, service_name: str = "") -> list:
-    """
-    Retorna slots de 30min disponíveis para o tenant.
-    Usa horário configurado pelo tenant (não fixo 9-18).
-    """
     check = check_business_hours_for_tenant(db, tenant_id, date_str)
     if not check["open"]:
         return []
@@ -97,14 +93,12 @@ def get_available_slots(db: Session, tenant_id: str, date_str: str, service_name
         slot_min  = cur % 60
         slot_time = date.replace(hour=slot_hour, minute=slot_min, second=0, microsecond=0)
 
-        # Pula slots no passado (com margem de 30min)
         if date.date() == now.date() and slot_time <= now + timedelta(minutes=30):
             cur += 30
             continue
 
-        # Verifica se já tem agendamento nesse horário para ESSE tenant
         existing = db.query(Appointment).filter(
-            Appointment.tenant_id == tenant_id,   # ← isolamento por tenant
+            Appointment.tenant_id == tenant_id,
             Appointment.scheduled_at == slot_time,
             Appointment.status != "cancelled"
         ).first()
@@ -116,7 +110,7 @@ def get_available_slots(db: Session, tenant_id: str, date_str: str, service_name
                 "available": True
             })
 
-        cur += 30  # slots de 30 em 30 minutos
+        cur += 30
 
     return slots
 
@@ -152,7 +146,6 @@ def get_next_business_day(db: Session = None, tenant_id: str = None) -> str:
         while str(day.weekday()) not in open_days_list or day.strftime("%Y-%m-%d") in FERIADOS:
             day += timedelta(days=1)
     else:
-        # fallback sem tenant: pula domingos e feriados
         while day.weekday() == 6 or day.strftime("%Y-%m-%d") in FERIADOS:
             day += timedelta(days=1)
 
@@ -161,9 +154,8 @@ def get_next_business_day(db: Session = None, tenant_id: str = None) -> str:
 
 def get_or_create_pet(db: Session, tenant_id: str, customer_id: str,
                       pet_name: str, breed: str = None, weight: float = None) -> Pet:
-    """Busca ou cria pet sempre filtrado por tenant_id."""
     pet = db.query(Pet).filter(
-        Pet.tenant_id == tenant_id,    # ← isolamento por tenant
+        Pet.tenant_id == tenant_id,
         Pet.customer_id == customer_id,
         Pet.name.ilike(pet_name)
     ).first()
@@ -193,11 +185,19 @@ def get_or_create_pet(db: Session, tenant_id: str, customer_id: str,
     return pet
 
 
-def create_appointment(db: Session, tenant_id: str, customer_id: str,
-                       service_id: str, datetime_str: str,
-                       pet_name: str = None, pet_breed: str = None,
-                       pet_weight: float = None, pickup_time: str = None,
-                       notes: str = "") -> dict:
+def create_appointment(
+    db: Session,
+    tenant_id: str,
+    customer_id: str,
+    service_id: str,
+    datetime_str: str,
+    pet_name: str = None,
+    pet_breed: str = None,
+    pet_weight: float = None,
+    pickup_time: str = None,
+    pickup_address: str = None,   # ← NOVO: endereço de busca/entrega (Etapa 5)
+    notes: str = "",
+) -> dict:
     try:
         scheduled_at = datetime.fromisoformat(datetime_str)
     except ValueError:
@@ -211,7 +211,6 @@ def create_appointment(db: Session, tenant_id: str, customer_id: str,
     if date_str in FERIADOS:
         return {"success": False, "error": "Feriado"}
 
-    # Valida horário usando configuração do tenant
     oh, om, ch, cm, open_days = _get_tenant_hours(db, tenant_id)
     weekday = str(scheduled_at.weekday())
     open_days_list = [d.strip() for d in open_days.split(',')]
@@ -219,16 +218,15 @@ def create_appointment(db: Session, tenant_id: str, customer_id: str,
     if weekday not in open_days_list:
         return {"success": False, "error": "Estabelecimento fechado nesse dia"}
 
-    slot_min = scheduled_at.hour * 60 + scheduled_at.minute
-    open_min = oh * 60 + om
+    slot_min  = scheduled_at.hour * 60 + scheduled_at.minute
+    open_min  = oh * 60 + om
     close_min = ch * 60 + cm
 
     if slot_min < open_min or slot_min >= close_min:
         return {"success": False, "error": "Fora do horário de atendimento"}
 
-    # Verifica conflito apenas para ESSE tenant
     existing = db.query(Appointment).filter(
-        Appointment.tenant_id == tenant_id,    # ← isolamento por tenant
+        Appointment.tenant_id == tenant_id,
         Appointment.scheduled_at == scheduled_at,
         Appointment.status != "cancelled"
     ).first()
@@ -251,6 +249,7 @@ def create_appointment(db: Session, tenant_id: str, customer_id: str,
         pet_weight=pet_weight,
         scheduled_at=scheduled_at,
         pickup_time=pickup_time,
+        pickup_address=pickup_address,   # ← NOVO
         status="confirmed",
         payment_status="pending",
         notes=notes
@@ -260,6 +259,9 @@ def create_appointment(db: Session, tenant_id: str, customer_id: str,
     db.commit()
     db.refresh(appointment)
 
+    # LGPD: nunca loga o endereço em texto plano
+    print(f"[Agendamento] tenant={tenant_id[:8]} | endereço: {'sim' if pickup_address else 'não'}")
+
     return {
         "success": True,
         "appointment_id": appointment.id,
@@ -268,10 +270,9 @@ def create_appointment(db: Session, tenant_id: str, customer_id: str,
 
 
 def cancel_appointment(db: Session, appointment_id: str, tenant_id: str) -> dict:
-    """Cancela agendamento garantindo que pertence ao tenant."""
     appointment = db.query(Appointment).filter(
         Appointment.id == appointment_id,
-        Appointment.tenant_id == tenant_id    # ← isolamento por tenant
+        Appointment.tenant_id == tenant_id
     ).first()
 
     if not appointment:
@@ -285,11 +286,10 @@ def cancel_appointment(db: Session, appointment_id: str, tenant_id: str) -> dict
 
 
 def get_customer_appointments(db: Session, tenant_id: str, customer_id: str) -> list:
-    """Lista agendamentos futuros do cliente, sempre filtrado por tenant."""
     now = agora_brasilia()
 
     appointments = db.query(Appointment).filter(
-        Appointment.tenant_id == tenant_id,    # ← isolamento por tenant
+        Appointment.tenant_id == tenant_id,
         Appointment.customer_id == customer_id,
         Appointment.scheduled_at >= now,
         Appointment.status != "cancelled"
@@ -297,14 +297,15 @@ def get_customer_appointments(db: Session, tenant_id: str, customer_id: str) -> 
 
     return [
         {
-            "id":           a.id,
-            "scheduled_at": a.scheduled_at.strftime("%d/%m/%Y às %H:%M"),
-            "status":       a.status,
-            "service_id":   a.service_id,
-            "pet_name":     a.pet_name,
-            "pet_breed":    a.pet_breed,
-            "pet_weight":   a.pet_weight,
-            "pickup_time":  a.pickup_time,
+            "id":             a.id,
+            "scheduled_at":   a.scheduled_at.strftime("%d/%m/%Y às %H:%M"),
+            "status":         a.status,
+            "service_id":     a.service_id,
+            "pet_name":       a.pet_name,
+            "pet_breed":      a.pet_breed,
+            "pet_weight":     a.pet_weight,
+            "pickup_time":    a.pickup_time,
+            "pickup_address": a.pickup_address,  # ← NOVO (usado pelo dashboard)
         }
         for a in appointments
     ]

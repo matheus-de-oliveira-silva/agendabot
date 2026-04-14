@@ -7,7 +7,7 @@ import asyncio, os
 load_dotenv()
 
 from .database import engine, Base
-from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook, admin
+from .routers import webhook, appointments, telegram_webhook, dashboard, whatsapp_webhook, admin, setup, billing
 
 Base.metadata.create_all(bind=engine)
 
@@ -95,6 +95,44 @@ def _auto_migrate_v3():
         print(f"[migrate-v3] erro: {e}")
 
 _auto_migrate_v3()
+
+# ── Migração v4: endereço, onboarding, planos SaaS ───────────────────────────
+def _auto_migrate_v4():
+    novas_colunas = {
+        "tenants": [
+            ("needs_address",  "BOOLEAN DEFAULT FALSE"),
+            ("address_label",  "VARCHAR DEFAULT 'Endereço de busca'"),
+            ("setup_token",    "VARCHAR"),
+            ("setup_done",     "BOOLEAN DEFAULT FALSE"),
+            ("plan",           "VARCHAR DEFAULT 'basico'"),
+            ("plan_active",    "BOOLEAN DEFAULT TRUE"),
+            ("billing_email",  "VARCHAR"),
+        ],
+        "appointments": [
+            ("pickup_address", "VARCHAR"),
+        ],
+    }
+    try:
+        inspector = sa_inspect(engine)
+        with engine.connect() as conn:
+            for tabela, cols in novas_colunas.items():
+                try:
+                    existentes = {c["name"] for c in inspector.get_columns(tabela)}
+                except Exception:
+                    existentes = set()
+                for col, tipo in cols:
+                    if col not in existentes:
+                        try:
+                            conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
+                            print(f"[migrate-v4] ok {tabela}.{col}")
+                        except Exception as e:
+                            print(f"[migrate-v4] skip {tabela}.{col}: {e}")
+            conn.commit()
+        print("[migrate-v4] concluida.")
+    except Exception as e:
+        print(f"[migrate-v4] erro: {e}")
+
+_auto_migrate_v4()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -124,7 +162,6 @@ app = FastAPI(
     description="Chatbot de agendamento para negocios locais",
     version="1.0.0",
     lifespan=lifespan,
-    # Desabilita docs em produção para não expor endpoints
     docs_url=None if os.getenv("ENVIRONMENT") == "production" else "/docs",
     redoc_url=None,
 )
@@ -135,6 +172,8 @@ app.include_router(telegram_webhook.router)
 app.include_router(dashboard.router)
 app.include_router(whatsapp_webhook.router)
 app.include_router(admin.router)
+app.include_router(setup.router)
+app.include_router(billing.router)          # ← Etapa 7: Kiwify billing
 
 
 @app.get("/")

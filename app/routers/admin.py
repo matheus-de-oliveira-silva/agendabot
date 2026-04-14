@@ -31,6 +31,19 @@ ICON_SUGGESTIONS = {
     "outro":     ["⚙️", "📅", "🏢", "⭐", "🎯"],
 }
 
+PLANS = {
+    "basico":  "⭐ Básico",
+    "pro":     "🚀 Pro",
+    "agencia": "🏢 Agência",
+}
+
+ADDRESS_LABELS = [
+    "Endereço de busca",
+    "Endereço de entrega",
+    "Endereço de coleta",
+    "Endereço do cliente",
+]
+
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
 def check_admin(request: Request):
@@ -180,6 +193,12 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
         bot_label = "🤖 Ativo" if getattr(t, 'bot_active', True) else "🤖 Pausado"
         icon = getattr(t, 'tenant_icon', '🐾') or '🐾'
         dash_url = f"{base_url}/dashboard?tid={t.id}"
+        plan_label = PLANS.get(getattr(t, 'plan', 'basico') or 'basico', '⭐ Básico')
+        plan_active = getattr(t, 'plan_active', True)
+        plan_badge = "badge-green" if plan_active else "badge-red"
+        setup_done = getattr(t, 'setup_done', False)
+        setup_badge = "badge-green" if setup_done else "badge-gray"
+        setup_label = "✅ Setup ok" if setup_done else "⚠️ Setup pendente"
         rows += f"""
         <div class="tenant-row">
             <div class="tenant-icon">{icon}</div>
@@ -188,6 +207,8 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
                 <div style="font-size:12px;color:#9aa0b8;margin-top:2px">{count} agendamentos · {clientes} clientes</div>
             </div>
             <span class="tenant-type">{tipo}</span>
+            <span class="badge {plan_badge}">{plan_label}</span>
+            <span class="badge {setup_badge}">{setup_label}</span>
             <span class="badge {bot_status}">{bot_label}</span>
             <span class="badge {badge_pw}">{has_pw}</span>
             <a href="{dash_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Painel</a>
@@ -250,6 +271,26 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
     </div>
     <div class="form-group"><label>WhatsApp do dono (para receber notificações de novos agendamentos)</label>
     <input name="owner_phone" placeholder="Ex: 5511999999999 (com DDI e DDD, sem + ou espaços)"></div>
+    <div class="grid2">
+        <div class="form-group"><label>Plano</label>
+        <select name="plan">
+            {''.join(f'<option value="{k}">{v}</option>' for k,v in PLANS.items())}
+        </select></div>
+        <div class="form-group"><label>Email do comprador (Hotmart/Kiwify)</label>
+        <input name="billing_email" placeholder="email@cliente.com" type="email"></div>
+    </div>
+    <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" name="needs_address" value="1" style="width:auto;margin:0">
+            <span>Este negócio coleta endereço do cliente (busca/entrega)</span>
+        </label>
+    </div>
+    <div class="form-group" id="address-label-group-new" style="display:none">
+        <label>Label do endereço</label>
+        <select name="address_label">
+            {''.join(f'<option value="{l}">{l}</option>' for l in ADDRESS_LABELS)}
+        </select>
+    </div>
     <div class="grid3">
         <div class="form-group"><label>Abre às</label>
         <input name="open_time" type="time" value="09:00"></div>
@@ -293,6 +334,11 @@ function toggleDay(btn, suffix) {{
     const active = [...grid.querySelectorAll('.day-btn.active')].map(b => b.dataset.day);
     document.getElementById('open_days_' + suffix).value = active.join(',');
 }}
+document.addEventListener('DOMContentLoaded', function() {{
+    const cb = document.querySelector('input[name="needs_address"]');
+    const grp = document.getElementById('address-label-group-new');
+    if (cb && grp) cb.addEventListener('change', () => grp.style.display = cb.checked ? 'block' : 'none');
+}});
 </script>
 </body></html>""")
 
@@ -319,6 +365,13 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
         close_time=form.get("close_time", "18:00"),
         owner_phone=form.get("owner_phone") or None,
         notify_new_appt=True,
+        needs_address=form.get("needs_address") == "1",
+        address_label=form.get("address_label", "Endereço de busca"),
+        plan=form.get("plan", "basico"),
+        plan_active=True,
+        billing_email=form.get("billing_email") or None,
+        setup_token=secrets.token_urlsafe(32),
+        setup_done=False,
         dashboard_password=hashed,
         dashboard_token=secrets.token_urlsafe(32),
         bot_active=True,
@@ -413,8 +466,31 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" data-day="{i}" onclick="toggleDay(this,\'edit\')">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
-    bot_checked = 'checked' if getattr(tenant, 'bot_active', True) else ''
+    bot_checked    = 'checked' if getattr(tenant, 'bot_active', True) else ''
     notify_checked = 'checked' if getattr(tenant, 'notify_new_appt', True) else ''
+    needs_address_checked = 'checked' if getattr(tenant, 'needs_address', False) else ''
+    current_address_label = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
+    current_plan    = getattr(tenant, 'plan', 'basico') or 'basico'
+    plan_active     = getattr(tenant, 'plan_active', True)
+    setup_done      = getattr(tenant, 'setup_done', False)
+    setup_token_val = getattr(tenant, 'setup_token', None) or ''
+    billing_email_val = getattr(tenant, 'billing_email', '') or ''
+    setup_url = f"{base_url}/setup?token={setup_token_val}" if setup_token_val else ""
+    if setup_url:
+        _cpbtn = "navigator.clipboard.writeText(document.getElementById('setup-url').textContent)"
+        setup_link_html = (
+            '<div class="link-box">'
+            '<div style="font-size:11px;color:#9aa0b8;margin-bottom:6px">Envie este link por email para o cliente:</div>'
+            f'<div class="link-url" id="setup-url">{setup_url}</div>'
+            '</div>'
+            '<div style="display:flex;gap:8px;margin-top:8px">'
+            f'<button onclick="{_cpbtn}" class="btn btn-outline btn-sm">Copiar link setup</button>'
+            '</div>'
+        )
+        setup_btn_label = 'Gerar novo link'
+    else:
+        setup_link_html = '<div style="color:#9aa0b8;font-size:13px;margin-bottom:8px">Nenhum link gerado ainda.</div>'
+        setup_btn_label = 'Gerar link de setup'
 
     # Ícones
     suggestions = ICON_SUGGESTIONS.get(tenant.business_type, ICON_SUGGESTIONS['outro'])
@@ -467,6 +543,48 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </div>
 </div>
 
+<!-- Plano e Setup -->
+<div class="card">
+    <div class="card-title">💼 Plano e acesso de setup</div>
+    <div class="grid2" style="margin-bottom:16px">
+        <div>
+            <div style="font-size:11px;color:#9aa0b8;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Plano atual</div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:15px;font-weight:700">{PLANS.get(current_plan, current_plan)}</span>
+                <span class="badge {'badge-green' if plan_active else 'badge-red'}">{'Ativo' if plan_active else 'Suspenso'}</span>
+            </div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:#9aa0b8;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Setup do cliente</div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <span class="badge {'badge-green' if setup_done else 'badge-gray'}">{'✅ Concluído' if setup_done else '⚠️ Pendente'}</span>
+            </div>
+        </div>
+    </div>
+    <form method="POST" action="/admin/tenant/{tenant_id}/plan" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px">
+        <div style="flex:1">
+            <label>Alterar plano</label>
+            <select name="plan">
+                {''.join(f'<option value="{k}" {"selected" if k==current_plan else ""}>{v}</option>' for k,v in PLANS.items())}
+            </select>
+        </div>
+        <div style="flex:1">
+            <label>Email Hotmart/Kiwify</label>
+            <input name="billing_email" type="email" value="{billing_email_val}" placeholder="email@cliente.com">
+        </div>
+        <div style="display:flex;gap:6px">
+            <button type="submit" name="action" value="save" class="btn btn-primary">Salvar</button>
+            <button type="submit" name="action" value="suspend" class="btn btn-danger btn-sm" onclick="return confirm('Suspender assinatura?')" style="white-space:nowrap">{'▶ Reativar' if not plan_active else '⏸ Suspender'}</button>
+        </div>
+    </form>
+    <div class="divider"></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">🔗 Link de setup para o cliente</div>
+    {setup_link_html}
+    <form method="POST" action="/admin/tenant/{tenant_id}/generate-setup-link" style="display:inline">
+        <button type="submit" class="btn btn-success btn-sm">{setup_btn_label}</button>
+    </form>
+</div>
+
 <!-- Config -->
 <div class="card">
     <div class="card-title">🏢 Configurações do negócio</div>
@@ -506,6 +624,21 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </div>
     <div class="form-group"><label>WhatsApp do dono (notificações de novos agendamentos)</label>
     <input name="owner_phone" value="{getattr(tenant,'owner_phone','') or ''}" placeholder="5511999999999"></div>
+    <div class="divider"></div>
+    <div class="section-title">📍 Endereço e entrega</div>
+    <div class="form-group">
+        <label class="toggle-switch" style="margin-bottom:10px">
+            <input type="checkbox" name="needs_address" value="1" {needs_address_checked} onchange="toggleAddressLabel(this.checked,'edit')">
+            <span class="slider"></span>
+            <span style="font-size:13px;color:#e8eaf2;font-weight:600">Este negócio coleta endereço do cliente</span>
+        </label>
+        <div id="address-label-edit" style="display:{'block' if needs_address_checked else 'none'};margin-top:10px">
+            <label>Label do endereço (como aparece no bot e no painel)</label>
+            <select name="address_label">
+                {''.join(f'<option value="{l}" {"selected" if l==current_address_label else ""}>{l}</option>' for l in ADDRESS_LABELS)}
+            </select>
+        </div>
+    </div>
     <div class="divider"></div>
     <div class="section-title">⏰ Horário de funcionamento</div>
     <div class="grid2">
@@ -724,6 +857,10 @@ function toggleDay(btn, suffix) {{
     const active = [...grid.querySelectorAll('.day-btn.active')].map(b => b.dataset.day);
     document.getElementById('open_days_' + suffix).value = active.join(',');
 }}
+function toggleAddressLabel(checked, suffix) {{
+    const el = document.getElementById('address-label-' + suffix);
+    if (el) el.style.display = checked ? 'block' : 'none';
+}}
 </script>
 </body></html>""")
 
@@ -747,6 +884,8 @@ async def save_config(tenant_id: str, request: Request, db: Session = Depends(ge
     t.owner_phone          = form.get("owner_phone") or getattr(t, 'owner_phone', None)
     t.bot_active           = form.get("bot_active") == "1"
     t.notify_new_appt      = form.get("notify_new_appt") == "1"
+    t.needs_address        = form.get("needs_address") == "1"
+    t.address_label        = form.get("address_label") or getattr(t, 'address_label', 'Endereço de busca')
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
@@ -822,6 +961,34 @@ def delete_blocked(tenant_id: str, blocked_id: str, request: Request, db: Sessio
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     b = db.query(BlockedSlot).filter(BlockedSlot.id == blocked_id, BlockedSlot.tenant_id == tenant_id).first()
     if b: db.delete(b); db.commit()
+    return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
+# ── Gerar link de setup ──────────────────────────────────────────────────────
+@router.post("/admin/tenant/{tenant_id}/generate-setup-link")
+def generate_setup_link(tenant_id: str, request: Request, db: Session = Depends(get_db)):
+    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
+    t.setup_token = secrets.token_urlsafe(32)
+    t.setup_done  = False
+    db.commit()
+    return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
+# ── Alterar plano / suspender ─────────────────────────────────────────────────
+@router.post("/admin/tenant/{tenant_id}/plan")
+async def update_plan(tenant_id: str, request: Request, db: Session = Depends(get_db)):
+    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    form = await request.form()
+    t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
+    action = form.get("action", "save")
+    if action == "suspend":
+        t.plan_active = not getattr(t, 'plan_active', True)
+        t.bot_active  = t.plan_active
+    else:
+        t.plan = form.get("plan", getattr(t, 'plan', 'basico'))
+        t.billing_email = form.get("billing_email") or getattr(t, 'billing_email', None)
+    db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
 # ── Migração v3 via HTTP ──────────────────────────────────────────────────────
