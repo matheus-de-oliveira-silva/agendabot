@@ -556,7 +556,8 @@ async function saveAndNext() {{
   if (res.ok) {{
     window.location.href = `/setup/step5?token=${{TOKEN}}`;
   }} else {{
-    alert('Erro ao salvar. Tente novamente.');
+    const data = await res.json().catch(() => ({{}}));
+    alert(data.error || 'Erro ao salvar. Tente novamente.');
   }}
 }}
 </script>
@@ -600,9 +601,27 @@ async def setup_step4_save(request: Request, token: str = "", db: Session = Depe
 
     body = await request.json()
     instance = (body.get("instance") or "").strip()
-    if instance:
-        tenant.phone_number_id = instance
+    if not instance:
+        return JSONResponse({"ok": True})
+
+    # Verifica se já está em uso por outro tenant
+    existing = db.query(Tenant).filter(
+        Tenant.phone_number_id == instance,
+        Tenant.id != tenant.id
+    ).first()
+    if existing:
+        return JSONResponse(
+            {"error": f"A instância '{instance}' já está em uso por outro negócio. Use um nome diferente."},
+            status_code=409
+        )
+
+    tenant.phone_number_id = instance
+    try:
         db.commit()
+    except Exception:
+        db.rollback()
+        return JSONResponse({"error": "Erro ao salvar. Tente novamente."}, status_code=500)
+
     return JSONResponse({"ok": True})
 
 
