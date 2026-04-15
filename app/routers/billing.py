@@ -7,28 +7,16 @@ Fluxo completo:
   compra_reembolsada / chargeback / subscription_canceled / subscription_late → suspende
 
 Planos:
-  basico  R$97  — até 7 serviços, sem CSV, sem lembretes automáticos
-  pro     R$197 — serviços ilimitados, CSV, lembretes automáticos
-  agencia R$497 — tudo do pro + até 3 tenants vinculados ao mesmo email
-
-Como configurar na Kiwify:
-1. Acesse Apps → Webhooks → Criar Webhook
-2. URL: https://seu-dominio.com/billing/webhook
-3. Token: coloque o mesmo valor de KIWIFY_WEBHOOK_TOKEN no .env
-4. Eventos a marcar:
-   - compra_aprovada
-   - compra_reembolsada
-   - chargeback
-   - subscription_canceled
-   - subscription_late
-   - subscription_renewed
+  basico  R$97,90  — até 7 serviços, sem CSV, sem lembretes automáticos
+  pro     R$197,90 — serviços ilimitados, CSV, lembretes automáticos
+  agencia R$497,90 — tudo do pro + até 3 tenants vinculados ao mesmo email
 
 Variáveis de ambiente necessárias:
-  KIWIFY_WEBHOOK_TOKEN     — token configurado no webhook da Kiwify
-  KIWIFY_PRODUCT_BASICO    — ID do produto básico na Kiwify
-  KIWIFY_PRODUCT_PRO       — ID do produto pro na Kiwify
-  KIWIFY_PRODUCT_AGENCIA   — ID do produto agência na Kiwify
-  EVOLUTION_API_URL        — URL da Evolution API (para enviar WhatsApp de boas-vindas)
+  KIWIFY_WEBHOOK_TOKEN     — token gerado pela Kiwify no webhook (campo "Token")
+  KIWIFY_PRODUCT_BASICO    — ID do plano básico na Kiwify
+  KIWIFY_PRODUCT_PRO       — ID do plano pro na Kiwify
+  KIWIFY_PRODUCT_AGENCIA   — ID do plano agência na Kiwify
+  EVOLUTION_API_URL        — URL da Evolution API
   EVOLUTION_API_KEY        — chave da Evolution API
   EVOLUTION_INSTANCE       — instância principal (do Matheus) para enviar mensagens
 """
@@ -47,27 +35,49 @@ EVOLUTION_API_URL    = os.getenv("EVOLUTION_API_URL", "")
 EVOLUTION_API_KEY    = os.getenv("EVOLUTION_API_KEY", "")
 EVOLUTION_INSTANCE   = os.getenv("EVOLUTION_INSTANCE", "agendabot")
 
-# Mapeamento produto_id → plano (configure com os IDs reais da Kiwify)
+# Mapeamento produto_id → plano
 PRODUCT_PLAN_MAP = {
     os.getenv("KIWIFY_PRODUCT_BASICO",  ""): "basico",
     os.getenv("KIWIFY_PRODUCT_PRO",     ""): "pro",
     os.getenv("KIWIFY_PRODUCT_AGENCIA", ""): "agencia",
 }
 
-EVENTOS_ATIVAR    = {"compra_aprovada", "subscription_renewed"}
-EVENTOS_SUSPENDER = {"compra_reembolsada", "chargeback", "subscription_canceled", "subscription_late"}
+EVENTOS_ATIVAR = {"compra_aprovada", "subscription_renewed"}
+EVENTOS_SUSPENDER = {
+    "compra_reembolsada", "chargeback", "subscription_canceled",
+    "subscription_late", "reembolso", "assinatura_cancelada", "assinatura_atrasada"
+}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _verify_token(body: dict) -> bool:
+def _verify_token(body: dict, request: Request = None) -> bool:
+    """
+    Verifica o token de segurança da Kiwify.
+    A Kiwify manda o token de duas formas:
+      1. Como query param ?signature=xxx na URL (forma atual da Kiwify)
+      2. Como campo webhook_token no body (fallback)
+    """
     if not KIWIFY_WEBHOOK_TOKEN:
         print("[Billing] ⚠️ KIWIFY_WEBHOOK_TOKEN não configurado — aceitando sem verificação")
         return True
-    return body.get("webhook_token", "") == KIWIFY_WEBHOOK_TOKEN
+
+    # 1. Query param ?signature=xxx (Kiwify atual)
+    if request:
+        signature = request.query_params.get("signature", "")
+        if signature and signature == KIWIFY_WEBHOOK_TOKEN:
+            return True
+
+    # 2. Campo no body (fallback)
+    token_body = body.get("webhook_token", "")
+    if token_body and token_body == KIWIFY_WEBHOOK_TOKEN:
+        return True
+
+    return False
 
 
 def _get_customer_data(body: dict) -> dict:
+    """Extrai dados do cliente do payload da Kiwify."""
     c = body.get("Customer") or body.get("customer") or {}
     return {
         "email": (c.get("email") or body.get("email") or "").strip().lower(),
@@ -77,18 +87,35 @@ def _get_customer_data(body: dict) -> dict:
 
 
 def _get_plan(body: dict) -> str:
-    product_id = body.get("product_id") or (body.get("Product") or {}).get("id") or ""
+    """
+    Determina o plano a partir do product_id ou nome do produto.
+    Tenta múltiplos campos pois a Kiwify pode variar o payload entre planos.
+    """
+    product_id = (
+        body.get("product_id")
+        or (body.get("Product") or {}).get("id")
+        or (body.get("Subscription") or {}).get("plan_id")
+        or (body.get("Plan") or {}).get("id")
+        or ""
+    )
+
     plan = PRODUCT_PLAN_MAP.get(product_id, "")
-    if not plan:
-        # Fallback: tenta pelo nome do produto
-        product_name = ((body.get("Product") or {}).get("name") or "").lower()
-        if "agencia" in product_name or "agência" in product_name:
-            plan = "agencia"
-        elif "pro" in product_name:
-            plan = "pro"
-        else:
-            plan = "basico"
-    return plan
+    if plan:
+        return plan
+
+    # Fallback pelo nome do produto/plano
+    product_name = (
+        (body.get("Product") or {}).get("name")
+        or (body.get("Plan") or {}).get("name")
+        or ""
+    ).lower()
+
+    if "agencia" in product_name or "agência" in product_name or "497" in product_name:
+        return "agencia"
+    elif "pro" in product_name or "197" in product_name:
+        return "pro"
+    else:
+        return "basico"
 
 
 def _count_group_tenants(db: Session, email: str) -> int:
@@ -97,7 +124,10 @@ def _count_group_tenants(db: Session, email: str) -> int:
 
 
 def _criar_tenant(db: Session, email: str, name: str, phone: str, plan: str) -> Tenant:
-    """Cria um novo tenant com configurações padrão. Cliente personaliza no setup."""
+    """
+    Cria um novo tenant com configurações padrão.
+    O cliente vai personalizar tudo no setup wizard.
+    """
     biz_name = name or email.split("@")[0]
 
     # Senha temporária — cliente troca no passo 5 do setup
@@ -107,7 +137,7 @@ def _criar_tenant(db: Session, email: str, name: str, phone: str, plan: str) -> 
     tenant = Tenant(
         name=biz_name,
         display_name=biz_name,
-        business_type="outro",       # cliente escolhe no passo 0 do setup
+        business_type="outro",
         tenant_icon="⚙️",
         subject_label="Cliente",
         subject_label_plural="Clientes",
@@ -128,12 +158,12 @@ def _criar_tenant(db: Session, email: str, name: str, phone: str, plan: str) -> 
         setup_done=False,
         dashboard_password=hashed,
         dashboard_token=secrets.token_urlsafe(32),
-        bot_active=False,  # só ativa após concluir o setup
+        bot_active=False,
     )
     db.add(tenant)
     db.flush()
 
-    # Serviço placeholder — cliente troca no passo 3 do setup
+    # Serviço placeholder — cliente troca no setup
     db.add(Service(
         tenant_id=tenant.id,
         name="Serviço Padrão",
@@ -152,12 +182,12 @@ def _criar_tenant(db: Session, email: str, name: str, phone: str, plan: str) -> 
 async def _enviar_whatsapp_setup(phone: str, tenant_name: str, setup_url: str):
     """Envia o link de setup via WhatsApp usando a instância principal (do Matheus)."""
     if not phone or not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-        print(f"[Billing] WhatsApp não configurado — link de setup não enviado")
+        print("[Billing] WhatsApp não configurado — link de setup não enviado")
         return
 
     phone_clean = "".join(c for c in phone if c.isdigit())
     if not phone_clean:
-        print(f"[Billing] Número inválido para envio de WhatsApp")
+        print("[Billing] Número inválido para envio de WhatsApp")
         return
 
     mensagem = (
@@ -180,7 +210,7 @@ async def _enviar_whatsapp_setup(phone: str, tenant_name: str, setup_url: str):
                 timeout=10,
             )
             if resp.status_code in (200, 201):
-                print(f"[Billing] ✅ WhatsApp de setup enviado com sucesso")
+                print("[Billing] ✅ WhatsApp de setup enviado com sucesso")
             else:
                 print(f"[Billing] ❌ WhatsApp erro {resp.status_code}: {resp.text[:80]}")
         except Exception as e:
@@ -202,7 +232,8 @@ async def billing_webhook(request: Request):
     except Exception:
         return JSONResponse({"error": "Payload inválido"}, status_code=400)
 
-    if not _verify_token(body):
+    # Verificação de token — passa o request para checar query param
+    if not _verify_token(body, request):
         print("[Billing] ❌ Token inválido recebido")
         return JSONResponse({"error": "Token inválido"}, status_code=401)
 
@@ -212,11 +243,16 @@ async def billing_webhook(request: Request):
 
     print(f"[Billing] evento={event} | email_presente={'sim' if email else 'não'}")
 
+    # Log do payload em desenvolvimento para debug
+    if os.getenv("ENVIRONMENT") != "production":
+        print(f"[Billing][DEBUG] payload keys: {list(body.keys())}")
+
     if event not in EVENTOS_ATIVAR and event not in EVENTOS_SUSPENDER:
         print(f"[Billing] evento '{event}' ignorado")
         return {"status": "ignored", "event": event}
 
     if not email:
+        print(f"[Billing] ⚠️ Email não encontrado no payload do evento '{event}'")
         return JSONResponse({"error": "Email não encontrado no payload"}, status_code=422)
 
     db = SessionLocal()
@@ -241,11 +277,10 @@ async def billing_webhook(request: Request):
         tenants_existentes = db.query(Tenant).filter(Tenant.billing_email == email).all()
 
         if tenants_existentes:
-            # Reativa todos os tenants desse email (renovação de assinatura)
+            # Reativa todos os tenants desse email (renovação)
             for t in tenants_existentes:
                 t.plan_active = True
                 t.plan        = plan
-                # Só reativa o bot se o setup já foi concluído
                 if getattr(t, 'setup_done', False):
                     t.bot_active = True
             db.commit()
@@ -263,7 +298,7 @@ async def billing_webhook(request: Request):
         if plan == "agencia":
             count = _count_group_tenants(db, email)
             if count >= 3:
-                print(f"[Billing] ⚠️ Limite de 3 tenants do plano Agência atingido")
+                print("[Billing] ⚠️ Limite de 3 tenants do plano Agência atingido")
                 return JSONResponse(
                     {"error": "Limite de 3 negócios do plano Agência atingido."},
                     status_code=422
@@ -295,5 +330,5 @@ async def billing_webhook(request: Request):
 
 @router.get("/billing/webhook")
 async def billing_webhook_verify(request: Request):
-    """GET para verificar se a URL está ativa (alguns serviços fazem isso)."""
+    """GET para verificar se a URL está ativa."""
     return {"status": "ok", "service": "AgendaBot Billing"}
