@@ -4,8 +4,8 @@ whatsapp_webhook.py — Recebe mensagens WhatsApp via Evolution API.
 LGPD:
   - Mensagens nunca são logadas em texto plano
   - Endereços nunca aparecem em logs
-  - Cada tenant é isolado — dados de um tenant nunca acessam outro
-  - Histórico de conversa limitado a 20 mensagens e resetado após 24h de inatividade
+  - Cada tenant é isolado
+  - Histórico limitado a 20 mensagens, resetado após 24h
 """
 
 from fastapi import APIRouter, Request
@@ -26,6 +26,128 @@ import pytz
 
 router   = APIRouter()
 BRASILIA = pytz.timezone("America/Sao_Paulo")
+
+# Liga debug temporariamente para identificar o payload da Evolution
+# Mude para False após confirmar que está funcionando
+WA_DEBUG = os.getenv("WA_DEBUG", "true").lower() == "true"
+
+
+def _extract_message_data(body: dict) -> dict | None:
+    """
+    Extrai dados da mensagem do payload da Evolution API.
+    Suporta múltiplos formatos de payload entre versões da Evolution.
+    Retorna None se não for uma mensagem de texto válida.
+    """
+    event = (body.get("event") or "").lower()
+
+    # Log de debug para identificar o formato do payload
+    if WA_DEBUG:
+        print(f"[WA DEBUG] event='{event}' | keys={list(body.keys())}")
+
+    # ── Verifica se é um evento de mensagem ───────────────────────────────────
+    # Evolution v1/v2: event = "messages.upsert"
+    # Evolution v2+: event pode vir capitalizado ou com variação
+    # Aceita qualquer evento que contenha "message" no nome
+    eventos_aceitos = {"messages.upsert", "message", "messages", "new_message"}
+    if event and event not in eventos_aceitos and "message" not in event:
+        if WA_DEBUG:
+            print(f"[WA DEBUG] evento '{event}' ignorado")
+        return None
+
+    # ── Tenta extrair dados da mensagem em múltiplos formatos ─────────────────
+
+    # Formato 1: Evolution padrão — body.data.key + body.data.message
+    data = body.get("data") or {}
+    if isinstance(data, dict) and "key" in data:
+        key        = data.get("key", {})
+        remote_jid = key.get("remoteJid", "")
+        from_me    = key.get("fromMe", False)
+        message    = data.get("message", {})
+        push_name  = data.get("pushName", "") or data.get("pushname", "")
+
+        if WA_DEBUG:
+            print(f"[WA DEBUG] Formato 1 | fromMe={from_me} | jid={remote_jid} | msg_keys={list(message.keys()) if message else []}")
+
+        if from_me or "@g.us" in remote_jid:
+            return None
+
+        text = (
+            message.get("conversation") or
+            message.get("extendedTextMessage", {}).get("text") or
+            message.get("imageMessage", {}).get("caption") or
+            ""
+        ).strip()
+
+        if text:
+            return {
+                "text":      text,
+                "phone":     remote_jid.replace("@s.whatsapp.net", ""),
+                "push_name": push_name,
+                "instance":  body.get("instance") or body.get("instanceName") or data.get("instance") or "",
+            }
+
+    # Formato 2: Evolution sem "data" — campos direto na raiz
+    if "key" in body:
+        key        = body.get("key", {})
+        remote_jid = key.get("remoteJid", "")
+        from_me    = key.get("fromMe", False)
+        message    = body.get("message", {})
+        push_name  = body.get("pushName", "") or body.get("pushname", "")
+
+        if WA_DEBUG:
+            print(f"[WA DEBUG] Formato 2 | fromMe={from_me} | jid={remote_jid}")
+
+        if from_me or "@g.us" in remote_jid:
+            return None
+
+        text = (
+            message.get("conversation") or
+            message.get("extendedTextMessage", {}).get("text") or
+            ""
+        ).strip()
+
+        if text:
+            return {
+                "text":      text,
+                "phone":     remote_jid.replace("@s.whatsapp.net", ""),
+                "push_name": push_name,
+                "instance":  body.get("instance") or body.get("instanceName") or "",
+            }
+
+    # Formato 3: Evolution com messages array
+    messages = body.get("messages") or []
+    if isinstance(messages, list) and messages:
+        msg        = messages[0]
+        key        = msg.get("key", {})
+        remote_jid = key.get("remoteJid", "")
+        from_me    = key.get("fromMe", False)
+        message    = msg.get("message", {})
+        push_name  = msg.get("pushName", "") or msg.get("pushname", "")
+
+        if WA_DEBUG:
+            print(f"[WA DEBUG] Formato 3 | fromMe={from_me} | jid={remote_jid}")
+
+        if from_me or "@g.us" in remote_jid:
+            return None
+
+        text = (
+            message.get("conversation") or
+            message.get("extendedTextMessage", {}).get("text") or
+            ""
+        ).strip()
+
+        if text:
+            return {
+                "text":      text,
+                "phone":     remote_jid.replace("@s.whatsapp.net", ""),
+                "push_name": push_name,
+                "instance":  body.get("instance") or body.get("instanceName") or "",
+            }
+
+    if WA_DEBUG:
+        print(f"[WA DEBUG] Nenhum texto extraído | data_keys={list(data.keys()) if data else 'sem data'}")
+
+    return None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -113,18 +235,7 @@ def should_reset_conversation(conversation) -> bool:
     return (agora - conversation.updated_at) > timedelta(hours=24)
 
 
-def _find_tenant_for_whatsapp(db, body: dict):
-    """
-    Identifica o tenant pelo nome da instância Evolution no payload.
-    Com múltiplos tenants, o phone_number_id é obrigatório para isolamento.
-    LGPD: garante que a mensagem só vai para o tenant correto.
-    """
-    instance_name = (
-        body.get("instance")
-        or body.get("instanceName")
-        or body.get("data", {}).get("instance")
-        or ""
-    )
+def _find_tenant_for_whatsapp(db, instance_name: str):
     if instance_name:
         tenant = db.query(Tenant).filter(
             Tenant.phone_number_id == instance_name,
@@ -133,14 +244,12 @@ def _find_tenant_for_whatsapp(db, body: dict):
         if tenant:
             return tenant
 
-    # Fallback: se só há 1 tenant ativo, usa ele (ambiente de desenvolvimento)
     tenants_ativos = db.query(Tenant).filter(Tenant.bot_active == True).all()
     if len(tenants_ativos) == 1:
         return tenants_ativos[0]
 
-    # Múltiplos tenants sem instance identificada — não processa (segurança LGPD)
     if len(tenants_ativos) > 1:
-        print(f"[WhatsApp] ⚠️ Múltiplos tenants ativos mas instância não identificada no payload. Ignorando.")
+        print(f"[WhatsApp] ⚠️ Múltiplos tenants ativos e instância não identificada. Ignorando.")
     return None
 
 
@@ -148,35 +257,30 @@ def _find_tenant_for_whatsapp(db, body: dict):
 
 @router.post("/whatsapp/webhook")
 async def whatsapp_webhook(request: Request):
-    body = await request.json()
-
-    if body.get("event") != "messages.upsert":
-        return {"status": "ignored"}
-
     try:
-        data   = body["data"]
-        key    = data.get("key", {})
-        if key.get("fromMe"):
-            return {"status": "ignored"}
-        remote_jid = key.get("remoteJid", "")
-        if "@g.us" in remote_jid:
-            return {"status": "ignored"}
-        message      = data.get("message", {})
-        message_text = (
-            message.get("conversation") or
-            message.get("extendedTextMessage", {}).get("text") or ""
-        ).strip()
-        if not message_text:
-            return {"status": "ignored"}
-        customer_phone = remote_jid.replace("@s.whatsapp.net", "")
-        push_name      = data.get("pushName", "")
-    except (KeyError, TypeError):
+        body = await request.json()
+    except Exception:
+        return {"status": "invalid_json"}
+
+    # Extrai dados da mensagem com suporte a múltiplos formatos
+    msg_data = _extract_message_data(body)
+    if not msg_data:
         return {"status": "ignored"}
+
+    message_text   = msg_data["text"]
+    customer_phone = msg_data["phone"]
+    push_name      = msg_data["push_name"]
+    instance_name  = msg_data["instance"]
+
+    if WA_DEBUG:
+        print(f"[WA DEBUG] ✅ Mensagem extraída | instance={instance_name} | text_len={len(message_text)}")
 
     db = SessionLocal()
     try:
-        tenant = _find_tenant_for_whatsapp(db, body)
+        tenant = _find_tenant_for_whatsapp(db, instance_name)
         if not tenant:
+            if WA_DEBUG:
+                print(f"[WA DEBUG] Tenant não encontrado para instance='{instance_name}'")
             return {"status": "tenant_not_found"}
 
         if not getattr(tenant, 'bot_active', True):
@@ -190,7 +294,7 @@ async def whatsapp_webhook(request: Request):
         tenant_config = get_tenant_config(tenant)
         services      = get_tenant_services(db, tenant.id)
 
-        # Busca ou cria cliente (isolado por tenant_id — LGPD)
+        # Busca ou cria cliente
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
             Customer.phone     == customer_phone
@@ -207,7 +311,7 @@ async def whatsapp_webhook(request: Request):
             customer.name = push_name
             db.commit()
 
-        # Busca ou cria conversa (isolada por tenant_id — LGPD)
+        # Busca ou cria conversa
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id      == tenant.id,
             Conversation.customer_phone == customer_phone
@@ -240,6 +344,9 @@ async def whatsapp_webhook(request: Request):
         )
         action     = ai_response.get("action", "reply")
         reply_text = ""
+
+        if WA_DEBUG:
+            print(f"[WA DEBUG] IA action='{action}'")
 
         # ── check_availability ────────────────────────────────────────────────
         if action == "check_availability":
@@ -284,7 +391,6 @@ async def whatsapp_webhook(request: Request):
                 if not service_obj:
                     reply_text = "Serviço não encontrado. Pode escolher outro?"
                 else:
-                    # Salva nome do cliente
                     customer_name_ai = ai_response.get("customer_name", "")
                     nome_final = customer_name_ai or customer.name or push_name or ""
                     if nome_final and not customer.name:
@@ -309,17 +415,14 @@ async def whatsapp_webhook(request: Request):
                     )
 
                     if result["success"]:
-                        # Usa mensagem gerada pela IA (tom adaptado ao tipo de negócio)
                         ia_message = ai_response.get("message", "")
                         if ia_message:
-                            # Adiciona endereço se necessário (LGPD: só aqui, nunca em log)
                             if pickup_address:
                                 label = tenant_config.get("address_label", "Endereço")
                                 if label.lower() not in ia_message.lower():
                                     ia_message += f"\n📍 {label}: {pickup_address}"
                             reply_text = ia_message
                         else:
-                            # Fallback manual
                             subject   = tenant_config.get("subject_label", "Cliente")
                             price_fmt = f"R$ {svc_data['price']/100:.2f}" if svc_data.get('price') else ""
                             pet_info  = ai_response.get("pet_name", "")
@@ -336,7 +439,6 @@ async def whatsapp_webhook(request: Request):
                                 f"Até lá! 😊"
                             )
 
-                        # Notifica o dono
                         appt_obj = db.query(Appointment).filter(
                             Appointment.id == result["appointment_id"]
                         ).first()
@@ -382,7 +484,7 @@ async def whatsapp_webhook(request: Request):
         else:
             reply_text = ai_response.get("message", "Desculpe, não entendi. Pode repetir?")
 
-        # ── Segunda chamada à IA para slots específicos ───────────────────────
+        # ── Segunda chamada à IA para slots ───────────────────────────────────
         if reply_text.startswith("__SLOT_OK__"):
             parts      = reply_text.split("__")
             slot_time  = parts[2]
@@ -409,7 +511,7 @@ async def whatsapp_webhook(request: Request):
             ai2        = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
             reply_text = ai2.get("message", f"Ops! O horário das {slot_time} está ocupado. Temos {sugestoes} disponíveis. Qual prefere?")
 
-        # Atualiza histórico (limitado a 20 mensagens)
+        # Atualiza histórico e envia
         history.append({"role": "user",      "content": message_text})
         history.append({"role": "assistant", "content": reply_text})
         conversation.messages = json.dumps(history[-20:])
@@ -418,5 +520,8 @@ async def whatsapp_webhook(request: Request):
         await send_whatsapp_message(customer_phone, reply_text, tenant)
         return {"status": "ok"}
 
+    except Exception as e:
+        print(f"[WhatsApp] ❌ Erro inesperado: {e}")
+        return {"status": "error"}
     finally:
         db.close()
