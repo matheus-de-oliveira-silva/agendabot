@@ -3,7 +3,11 @@ reminder.py — Lembretes automáticos de agendamentos.
 
 Envia lembretes por WhatsApp (Evolution API) ou Telegram,
 sempre filtrado por tenant para garantir isolamento total.
-Cada tenant só recebe lembretes dos seus próprios clientes.
+
+Regra de plano:
+  - basico  → lembretes desativados
+  - pro     → lembretes ativos
+  - agencia → lembretes ativos
 """
 
 from datetime import datetime, timedelta
@@ -14,9 +18,9 @@ import httpx
 import os
 import pytz
 
-BRASILIA       = pytz.timezone("America/Sao_Paulo")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_API   = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+BRASILIA          = pytz.timezone("America/Sao_Paulo")
+TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_API      = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY")
 
@@ -26,7 +30,6 @@ def agora_brasilia() -> datetime:
 
 
 async def _send_telegram(chat_id: str, message: str):
-    """Envia mensagem via Telegram."""
     if not TELEGRAM_TOKEN:
         print(f"[Lembrete] TELEGRAM_TOKEN não configurado — pulando envio para {chat_id}")
         return
@@ -44,11 +47,10 @@ async def _send_telegram(chat_id: str, message: str):
 
 
 async def _send_whatsapp(phone: str, message: str, instance: str):
-    """Envia mensagem via Evolution API (WhatsApp)."""
     if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
         print(f"[Lembrete] Evolution API não configurada — pulando envio para {phone}")
         return
-    url = f"{EVOLUTION_API_URL}/message/sendText/{instance}"
+    url     = f"{EVOLUTION_API_URL}/message/sendText/{instance}"
     headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     async with httpx.AsyncClient() as client:
         try:
@@ -66,14 +68,12 @@ async def _send_whatsapp(phone: str, message: str, instance: str):
 
 def _build_reminder_message(appointment: Appointment, customer: Customer,
                              service: Service, tenant: Tenant) -> str:
-    """Monta mensagem de lembrete personalizada para o tenant."""
-    subject   = getattr(tenant, 'subject_label', 'Pet') or 'Pet'
-    biz_name  = tenant.display_name or tenant.name
-    horario   = appointment.scheduled_at.strftime("%d/%m às %H:%M")
-    nome      = customer.name or "Cliente"
-    svc_nome  = service.name if service else "atendimento"
+    subject  = getattr(tenant, 'subject_label', 'Pet') or 'Pet'
+    biz_name = tenant.display_name or tenant.name
+    horario  = appointment.scheduled_at.strftime("%d/%m às %H:%M")
+    nome     = customer.name or "Cliente"
+    svc_nome = service.name if service else "atendimento"
 
-    # Linha de pet/sujeito — se tem nome do pet, usa; senão omite
     pet_linha = ""
     if appointment.pet_name:
         pet_linha = f"🐾 {subject}: {appointment.pet_name}"
@@ -85,7 +85,7 @@ def _build_reminder_message(appointment: Appointment, customer: Customer,
     if appointment.pickup_time:
         pickup_linha = f"🏠 Busca: {appointment.pickup_time}\n"
 
-    mensagem = (
+    return (
         f"Oi, {nome}! 😊 Lembrando do seu agendamento amanhã:\n\n"
         f"📅 {horario}\n"
         f"✂️ {svc_nome}\n"
@@ -94,77 +94,70 @@ def _build_reminder_message(appointment: Appointment, customer: Customer,
         f"Qualquer dúvida é só chamar. Até amanhã! 🙏\n"
         f"— {biz_name}"
     )
-    return mensagem
 
 
 async def send_daily_reminders():
     """
     Busca agendamentos de amanhã e envia lembretes.
     Itera por tenant para garantir isolamento total.
-    Deve ser chamado uma vez por dia (às 18h pelo lifespan do main.py).
+    Plano básico não recebe lembretes automáticos.
     """
     db = SessionLocal()
     try:
-        agora = agora_brasilia()
+        agora         = agora_brasilia()
         amanha_inicio = (agora + timedelta(days=1)).replace(hour=0,  minute=0,  second=0,  microsecond=0)
         amanha_fim    = (agora + timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=0)
 
-        # ── Itera por tenant — nunca mistura dados entre tenants ──
-        tenants = db.query(Tenant).filter(Tenant.bot_active == True).all()
+        tenants        = db.query(Tenant).filter(Tenant.bot_active == True).all()
         total_enviados = 0
 
         for tenant in tenants:
+            # ── Plano básico não tem lembretes automáticos ────────────────
+            plano = getattr(tenant, 'plan', 'basico') or 'basico'
+            if plano == 'basico':
+                print(f"[Lembrete] '{tenant.display_name or tenant.name}': plano básico — lembretes desativados")
+                continue
+
             # Agendamentos de amanhã SOMENTE deste tenant
             appointments = db.query(Appointment).filter(
-                Appointment.tenant_id  == tenant.id,          # ← isolamento por tenant
+                Appointment.tenant_id    == tenant.id,
                 Appointment.scheduled_at >= amanha_inicio,
                 Appointment.scheduled_at <= amanha_fim,
-                Appointment.status == "confirmed"
+                Appointment.status       == "confirmed"
             ).all()
 
             if not appointments:
                 continue
 
-            print(f"[Lembrete] Tenant '{tenant.display_name or tenant.name}': {len(appointments)} agendamento(s)")
+            print(f"[Lembrete] '{tenant.display_name or tenant.name}': {len(appointments)} agendamento(s)")
 
-            # Instância WhatsApp do tenant (phone_number_id = nome da instância)
             wa_instance = getattr(tenant, 'phone_number_id', None) or \
                           os.getenv("EVOLUTION_INSTANCE", "agendabot")
 
             for appointment in appointments:
-                # Cliente sempre do mesmo tenant
                 customer = db.query(Customer).filter(
                     Customer.id        == appointment.customer_id,
-                    Customer.tenant_id == tenant.id              # ← isolamento por tenant
+                    Customer.tenant_id == tenant.id
                 ).first()
-
                 if not customer:
                     print(f"[Lembrete] Cliente não encontrado para appointment {appointment.id}")
                     continue
 
                 service = db.query(Service).filter(
                     Service.id        == appointment.service_id,
-                    Service.tenant_id == tenant.id               # ← isolamento por tenant
+                    Service.tenant_id == tenant.id
                 ).first()
 
                 mensagem = _build_reminder_message(appointment, customer, service, tenant)
+                phone    = customer.phone or ""
 
-                phone = customer.phone or ""
-
-                # Decide canal de envio:
-                # - Números numéricos → WhatsApp (Evolution API)
-                # - IDs numéricos longos do Telegram → Telegram
-                # - Prefixo "tg:" → Telegram explícito
                 if phone.startswith("tg:"):
-                    chat_id = phone.replace("tg:", "")
-                    await _send_telegram(chat_id, mensagem)
+                    await _send_telegram(phone.replace("tg:", ""), mensagem)
                     canal = "Telegram"
                 elif phone.isdigit() and len(phone) > 10:
-                    # Heurística: números com mais de 10 dígitos = celular brasileiro
                     await _send_whatsapp(phone, mensagem, wa_instance)
                     canal = "WhatsApp"
                 elif phone.isdigit():
-                    # Número curto = provavelmente chat_id do Telegram
                     await _send_telegram(phone, mensagem)
                     canal = "Telegram"
                 else:

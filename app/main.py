@@ -14,7 +14,6 @@ Base.metadata.create_all(bind=engine)
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "troca-essa-senha-admin")
 
 def _require_admin(request: Request):
-    """Protege rotas utilitárias com a mesma senha do admin."""
     token = request.headers.get("X-Admin-Token") or request.cookies.get("admin_token")
     if token != ADMIN_SECRET:
         raise HTTPException(status_code=401, detail="Não autorizado")
@@ -61,7 +60,7 @@ def _auto_migrate():
 
 _auto_migrate()
 
-# ── Migração v3: icone, owner_phone, blocked_slots ────────────────────────────
+# ── Migração v3 ───────────────────────────────────────────────────────────────
 def _auto_migrate_v3():
     try:
         inspector = sa_inspect(engine)
@@ -96,7 +95,7 @@ def _auto_migrate_v3():
 
 _auto_migrate_v3()
 
-# ── Migração v4: endereço, onboarding, planos SaaS ───────────────────────────
+# ── Migração v4 ───────────────────────────────────────────────────────────────
 def _auto_migrate_v4():
     novas_colunas = {
         "tenants": [
@@ -133,6 +132,35 @@ def _auto_migrate_v4():
         print(f"[migrate-v4] erro: {e}")
 
 _auto_migrate_v4()
+
+# ── Migração v5: grupo de tenants para plano Agência ─────────────────────────
+def _auto_migrate_v5():
+    novas_colunas = {
+        "tenants": [
+            ("plan_tenant_group", "VARCHAR"),
+        ],
+    }
+    try:
+        inspector = sa_inspect(engine)
+        with engine.connect() as conn:
+            for tabela, cols in novas_colunas.items():
+                try:
+                    existentes = {c["name"] for c in inspector.get_columns(tabela)}
+                except Exception:
+                    existentes = set()
+                for col, tipo in cols:
+                    if col not in existentes:
+                        try:
+                            conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
+                            print(f"[migrate-v5] ok {tabela}.{col}")
+                        except Exception as e:
+                            print(f"[migrate-v5] skip {tabela}.{col}: {e}")
+            conn.commit()
+        print("[migrate-v5] concluida.")
+    except Exception as e:
+        print(f"[migrate-v5] erro: {e}")
+
+_auto_migrate_v5()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -173,7 +201,7 @@ app.include_router(dashboard.router)
 app.include_router(whatsapp_webhook.router)
 app.include_router(admin.router)
 app.include_router(setup.router)
-app.include_router(billing.router)          # ← Etapa 7: Kiwify billing
+app.include_router(billing.router)
 
 
 @app.get("/")
@@ -184,7 +212,7 @@ def root():
 def health():
     return {"status": "healthy"}
 
-# ── Rotas utilitárias protegidas por ADMIN_SECRET ─────────────────────────────
+# ── Rotas utilitárias protegidas ──────────────────────────────────────────────
 
 @app.post("/test/reminders")
 async def test_reminders(request: Request):
@@ -225,7 +253,6 @@ def setup_tenant(data: dict, request: Request):
 
 @app.post("/admin/migrate")
 def migrate_legacy(request: Request):
-    """Rota legada — mantida por compatibilidade."""
     _require_admin(request)
     with engine.connect() as conn:
         conn.execute(text("""

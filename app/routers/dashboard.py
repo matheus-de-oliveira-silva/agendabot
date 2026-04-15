@@ -28,16 +28,37 @@ PAYMENT_LABELS = {
     "waived":  ("🎁 Isento", "#f3e5f5", "#6a1b9a"),
 }
 
-# Tipos de negócio que não precisam de pet/raça/peso
 BUSINESS_NO_SUBJECT = {"barbearia", "salao", "estetica", "outro"}
-
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
 
-# ─── Helpers de performance ───────────────────────────────────────────────────
+# ── Plan feature check ────────────────────────────────────────────────────────
+
+def _check_plan_feature(tenant, feature: str) -> bool:
+    """
+    Verifica se o plano do tenant permite uma feature.
+    basico  → sem CSV, sem lembretes, até 7 serviços
+    pro     → tudo liberado, 1 tenant
+    agencia → tudo liberado, até 3 tenants
+    """
+    plano       = getattr(tenant, 'plan', 'basico') or 'basico'
+    plan_active = getattr(tenant, 'plan_active', True)
+
+    if not plan_active:
+        return False
+
+    if feature == "csv":
+        return plano in ("pro", "agencia")
+    if feature == "lembretes":
+        return plano in ("pro", "agencia")
+    if feature == "servicos_ilimitados":
+        return plano in ("pro", "agencia")
+    return True
+
+
+# ── Helpers de performance ────────────────────────────────────────────────────
 
 def _load_customers_map(db: Session, tenant_id: str, customer_ids: list) -> dict:
-    """Carrega todos os clientes de uma vez — evita N queries."""
     if not customer_ids:
         return {}
     rows = db.query(Customer).filter(
@@ -48,7 +69,6 @@ def _load_customers_map(db: Session, tenant_id: str, customer_ids: list) -> dict
 
 
 def _load_services_map(db: Session, tenant_id: str, service_ids: list) -> dict:
-    """Carrega todos os serviços de uma vez — evita N queries."""
     if not service_ids:
         return {}
     rows = db.query(Service).filter(
@@ -64,7 +84,7 @@ def _price_fmt(service) -> str:
     return ""
 
 
-# ─── Auth ─────────────────────────────────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
 
 def get_tenant_from_request(request: Request, db: Session) -> Optional[object]:
     session_cookie = request.cookies.get("dash_session")
@@ -116,18 +136,18 @@ def dash_login_page(tid: str = "", request: Request = None, db: Session = Depend
     if tid:
         t = db.query(Tenant).filter(Tenant.id == tid).first()
         if t:
-            icon = getattr(t, 'tenant_icon', '🐾') or '🐾'
+            icon     = getattr(t, 'tenant_icon', '🐾') or '🐾'
             biz_name = t.display_name or t.name
     return HTMLResponse(login_page_html(tid, icon, biz_name))
 
 
 @router.post("/dashboard/login")
 async def dash_do_login(request: Request, db: Session = Depends(get_db)):
-    form = await request.form()
-    tid = form.get("tid", "")
+    form     = await request.form()
+    tid      = form.get("tid", "")
     password = form.get("password", "")
-    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
-    icon = getattr(tenant, 'tenant_icon', '🐾') if tenant else '🐾'
+    tenant   = db.query(Tenant).filter(Tenant.id == tid).first()
+    icon     = getattr(tenant, 'tenant_icon', '🐾') if tenant else '🐾'
     biz_name = (tenant.display_name or tenant.name) if tenant else "Painel"
     if not tenant or not tenant.dashboard_password:
         return HTMLResponse(login_page_html(tid, icon, biz_name, "Tenant não encontrado."))
@@ -148,7 +168,7 @@ def dash_logout(tid: str = ""):
     return resp
 
 
-# ─── APIs ─────────────────────────────────────────────────────────────────────
+# ── APIs ──────────────────────────────────────────────────────────────────────
 
 @router.post("/api/appointment/{appointment_id}/status")
 async def update_status(appointment_id: str, request: Request, db: Session = Depends(get_db)):
@@ -215,10 +235,10 @@ async def update_payment(appointment_id: str, request: Request, db: Session = De
 @router.post("/api/appointment/create")
 async def create_appt(request: Request, db: Session = Depends(get_db)):
     try:
-        data = await request.json()
+        data   = await request.json()
         tenant = get_tenant_from_request(request, db)
         if not tenant:
-            tid = data.get("tenant_id", "")
+            tid    = data.get("tenant_id", "")
             tenant = db.query(Tenant).filter(Tenant.id == tid).first() if tid else None
         if not tenant:
             return JSONResponse({"error": "Não autenticado"}, status_code=401)
@@ -231,18 +251,17 @@ async def create_appt(request: Request, db: Session = Depends(get_db)):
 
         scheduled_at = datetime.fromisoformat(scheduled_str)
 
-        # Verifica conflito
         existing = db.query(Appointment).filter(
-            Appointment.tenant_id == tenant.id,
+            Appointment.tenant_id   == tenant.id,
             Appointment.scheduled_at == scheduled_at,
-            Appointment.status != "cancelled"
+            Appointment.status      != "cancelled"
         ).first()
         if existing:
             return JSONResponse({"error": "Horário já ocupado"}, status_code=409)
 
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
-            Customer.name == customer_name
+            Customer.name      == customer_name
         ).first()
         if not customer:
             customer = Customer(tenant_id=tenant.id, name=customer_name, phone="manual")
@@ -250,7 +269,7 @@ async def create_appt(request: Request, db: Session = Depends(get_db)):
             db.flush()
 
         service = db.query(Service).filter(
-            Service.id == service_id,
+            Service.id        == service_id,
             Service.tenant_id == tenant.id
         ).first()
         if not service:
@@ -260,23 +279,16 @@ async def create_appt(request: Request, db: Session = Depends(get_db)):
         pet_breed  = (data.get("pet_breed") or "").strip() or None
         pet_weight = None
         if data.get("pet_weight"):
-            try:
-                pet_weight = float(data["pet_weight"])
-            except Exception:
-                pass
+            try: pet_weight = float(data["pet_weight"])
+            except: pass
 
         appt = Appointment(
-            tenant_id=tenant.id,
-            customer_id=customer.id,
-            service_id=service.id,
-            pet_name=pet_name,
-            pet_breed=pet_breed,
-            pet_weight=pet_weight,
+            tenant_id=tenant.id, customer_id=customer.id, service_id=service.id,
+            pet_name=pet_name, pet_breed=pet_breed, pet_weight=pet_weight,
             scheduled_at=scheduled_at,
             pickup_time=data.get("pickup_time") or None,
             pickup_address=data.get("pickup_address") or None,
-            status="confirmed",
-            payment_status="pending",
+            status="confirmed", payment_status="pending",
         )
         db.add(appt)
         db.commit()
@@ -298,15 +310,15 @@ def check_avail(date: str, request: Request, tid: str = "", db: Session = Depend
         start = day.replace(hour=0,  minute=0,  second=0)
         end   = day.replace(hour=23, minute=59, second=59)
         appts = db.query(Appointment).filter(
-            Appointment.tenant_id == tenant.id,
+            Appointment.tenant_id    == tenant.id,
             Appointment.scheduled_at >= start,
             Appointment.scheduled_at <= end,
-            Appointment.status != "cancelled"
+            Appointment.status       != "cancelled"
         ).all()
-        busy = [a.scheduled_at.strftime("%H:%M") for a in appts]
+        busy    = [a.scheduled_at.strftime("%H:%M") for a in appts]
         blocked = db.query(BlockedSlot).filter(
             BlockedSlot.tenant_id == tenant.id,
-            BlockedSlot.date == date
+            BlockedSlot.date      == date
         ).all()
         for b in blocked:
             if b.time:
@@ -323,7 +335,7 @@ def get_services(request: Request, db: Session = Depends(get_db)):
         return {"services": []}
     services = db.query(Service).filter(
         Service.tenant_id == tenant.id,
-        Service.active == True
+        Service.active    == True
     ).order_by(Service.name).all()
     return {"services": [
         {"id": s.id, "name": s.name, "price": s.price, "duration_min": s.duration_min, "color": s.color}
@@ -337,22 +349,18 @@ async def update_service(service_id: str, request: Request, db: Session = Depend
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     data = await request.json()
-    svc = db.query(Service).filter(
-        Service.id == service_id,
+    svc  = db.query(Service).filter(
+        Service.id        == service_id,
         Service.tenant_id == tenant.id
     ).first()
     if not svc:
         return JSONResponse({"error": "Não encontrado"}, status_code=404)
     if "price" in data:
-        try:
-            svc.price = int(float(data["price"]) * 100)
-        except Exception:
-            pass
+        try: svc.price = int(float(data["price"]) * 100)
+        except: pass
     if "duration_min" in data:
-        try:
-            svc.duration_min = int(data["duration_min"])
-        except Exception:
-            pass
+        try: svc.duration_min = int(data["duration_min"])
+        except: pass
     if "name" in data and data["name"].strip():
         svc.name = data["name"].strip()
     db.commit()
@@ -364,22 +372,31 @@ async def create_service(request: Request, db: Session = Depends(get_db)):
     tenant = get_tenant_from_request(request, db)
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    # ── Limite de 7 serviços no plano básico ──────────────────────────────
+    if not _check_plan_feature(tenant, "servicos_ilimitados"):
+        count = db.query(Service).filter(
+            Service.tenant_id == tenant.id,
+            Service.active    == True
+        ).count()
+        if count >= 7:
+            return JSONResponse(
+                {"error": "Plano Básico permite até 7 serviços. Faça upgrade para o plano Pro para adicionar mais."},
+                status_code=403
+            )
+
     data = await request.json()
     name = (data.get("name") or "").strip()
     if not name:
         return JSONResponse({"error": "Nome obrigatório"}, status_code=400)
-    try:
-        price_cents = int(float(data.get("price", 0)) * 100)
-    except Exception:
-        price_cents = 0
+    try: price_cents = int(float(data.get("price", 0)) * 100)
+    except: price_cents = 0
+
     svc = Service(
-        tenant_id=tenant.id,
-        name=name,
+        tenant_id=tenant.id, name=name,
         duration_min=int(data.get("duration_min", 60)),
-        price=price_cents,
-        description=data.get("description", ""),
-        color=data.get("color", "#6C5CE7"),
-        active=True,
+        price=price_cents, description=data.get("description", ""),
+        color=data.get("color", "#6C5CE7"), active=True,
     )
     db.add(svc)
     db.commit()
@@ -392,7 +409,7 @@ def delete_service_api(service_id: str, request: Request, db: Session = Depends(
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     svc = db.query(Service).filter(
-        Service.id == service_id,
+        Service.id        == service_id,
         Service.tenant_id == tenant.id
     ).first()
     if svc:
@@ -401,20 +418,15 @@ def delete_service_api(service_id: str, request: Request, db: Session = Depends(
     return {"success": True}
 
 
-# ─── API: Configurações (aba nova — Etapa 6) ──────────────────────────────────
+# ── API: Configurações ────────────────────────────────────────────────────────
 
 @router.post("/api/tenant/config")
 async def save_tenant_config(request: Request, db: Session = Depends(get_db)):
-    """
-    Permite ao cliente editar configurações permitidas sem depender do Matheus.
-    Campos PROIBIDOS (não aceitos aqui): phone_number_id, wa_access_token, business_type, plan, plan_active.
-    """
     tenant = get_tenant_from_request(request, db)
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     data = await request.json()
 
-    # Campos permitidos — lista branca explícita
     if "display_name" in data and data["display_name"].strip():
         tenant.display_name      = data["display_name"].strip()
         tenant.bot_business_name = data["display_name"].strip()
@@ -439,11 +451,10 @@ async def save_tenant_config(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/api/tenant/password")
 async def change_password(request: Request, db: Session = Depends(get_db)):
-    """Permite ao cliente trocar a própria senha do dashboard."""
     tenant = get_tenant_from_request(request, db)
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
-    data = await request.json()
+    data       = await request.json()
     current_pw = data.get("current_password", "")
     new_pw     = data.get("new_password", "")
 
@@ -453,19 +464,25 @@ async def change_password(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": "Nova senha deve ter ao menos 6 caracteres"}, status_code=400)
 
     tenant.dashboard_password = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
-    # Invalida sessões antigas ao trocar senha
-    tenant.dashboard_token = secrets.token_urlsafe(32)
+    tenant.dashboard_token    = secrets.token_urlsafe(32)
     db.commit()
     return {"success": True, "new_token": tenant.dashboard_token}
 
 
-# ─── Exportação CSV (com endereço quando aplicável) ───────────────────────────
+# ── Exportação CSV ────────────────────────────────────────────────────────────
 
 @router.get("/api/export/relatorio")
 def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_db)):
     tenant = get_tenant_from_request(request, db)
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    # ── Bloqueia para plano básico ────────────────────────────────────────
+    if not _check_plan_feature(tenant, "csv"):
+        return JSONResponse(
+            {"error": "Exportação de relatório disponível apenas nos planos Pro e Agência. Faça upgrade para acessar."},
+            status_code=403
+        )
 
     needs_address = bool(getattr(tenant, 'needs_address', False))
     address_label = getattr(tenant, 'address_label', 'Endereço') or 'Endereço'
@@ -484,12 +501,11 @@ def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_
         fim_mes = mes_dt.replace(month=mes_dt.month + 1, day=1) - timedelta(seconds=1)
 
     appts = db.query(Appointment).filter(
-        Appointment.tenant_id == tenant.id,
+        Appointment.tenant_id    == tenant.id,
         Appointment.scheduled_at >= mes_dt,
         Appointment.scheduled_at <= fim_mes,
     ).order_by(Appointment.scheduled_at).all()
 
-    # Carrega em batch
     cids = [a.customer_id for a in appts]
     sids = [a.service_id  for a in appts]
     cmap = _load_customers_map(db, tenant.id, cids)
@@ -498,43 +514,39 @@ def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_
     output = io.StringIO()
     writer = csv.writer(output)
 
-    header = ["Data/Hora", "Cliente", "Serviço", "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca(Horário)"]
     if show_pet:
         header = ["Data/Hora", "Cliente", "Pet", "Raça", "Peso(kg)", "Serviço", "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca(Horário)"]
+    else:
+        header = ["Data/Hora", "Cliente", "Serviço", "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca(Horário)"]
     if needs_address:
         header.append(address_label)
     writer.writerow(header)
 
     for a in appts:
-        customer = cmap.get(a.customer_id)
-        service  = smap.get(a.service_id)
+        customer     = cmap.get(a.customer_id)
+        service      = smap.get(a.service_id)
         nome_cliente = (customer.name or customer.phone) if customer else "-"
         nome_servico = service.name if service else "-"
-        price_raw = a.payment_amount or (service.price if service else 0) or 0
-        valor = f"{price_raw/100:.2f}"
+        price_raw    = a.payment_amount or (service.price if service else 0) or 0
+        valor        = f"{price_raw/100:.2f}"
         status_label = STATUS_LABELS.get(a.status, (a.status, "", ""))[0]
         pay_label    = PAYMENT_LABELS.get(a.payment_status or "pending", (a.payment_status or "-", "", ""))[0]
         pay_label    = pay_label.replace("💳","").replace("✅","").replace("🎁","").strip()
 
         if show_pet:
             row = [
-                a.scheduled_at.strftime("%d/%m/%Y %H:%M"),
-                nome_cliente,
-                a.pet_name or "-",
-                a.pet_breed or "-",
-                a.pet_weight or "-",
-                nome_servico, valor, status_label, pay_label,
-                a.payment_method or "-",
-                a.payment_pix_key or "-",
+                a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
+                a.pet_name or "-", a.pet_breed or "-",
+                a.pet_weight or "-", nome_servico, valor,
+                status_label, pay_label,
+                a.payment_method or "-", a.payment_pix_key or "-",
                 a.pickup_time or "-",
             ]
         else:
             row = [
-                a.scheduled_at.strftime("%d/%m/%Y %H:%M"),
-                nome_cliente,
+                a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
                 nome_servico, valor, status_label, pay_label,
-                a.payment_method or "-",
-                a.payment_pix_key or "-",
+                a.payment_method or "-", a.payment_pix_key or "-",
                 a.pickup_time or "-",
             ]
         if needs_address:
@@ -550,7 +562,7 @@ def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_
     )
 
 
-# ─── Dashboard principal ──────────────────────────────────────────────────────
+# ── Dashboard principal ───────────────────────────────────────────────────────
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
@@ -575,24 +587,31 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     address_label  = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
     show_pet       = biz_type not in BUSINESS_NO_SUBJECT
 
+    # Plano
+    plano           = getattr(tenant, 'plan', 'basico') or 'basico'
+    plan_active     = getattr(tenant, 'plan_active', True)
+    pode_csv        = _check_plan_feature(tenant, "csv")
+    pode_lembretes  = _check_plan_feature(tenant, "lembretes")
+    pode_svc_ilimit = _check_plan_feature(tenant, "servicos_ilimitados")
+    plan_label      = {"basico": "⭐ Básico", "pro": "🚀 Pro", "agencia": "🏢 Agência"}.get(plano, "⭐ Básico")
+
     hoje        = agora_brasilia()
     inicio_hoje = hoje.replace(hour=0,  minute=0,  second=0,  microsecond=0)
     fim_hoje    = hoje.replace(hour=23, minute=59, second=59, microsecond=0)
 
-    # ── Queries principais (sem loops com sub-queries) ────────────────────────
     agendamentos_hoje = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
+        Appointment.tenant_id    == tid,
         Appointment.scheduled_at >= inicio_hoje,
         Appointment.scheduled_at <= fim_hoje,
-        Appointment.status != "cancelled"
+        Appointment.status       != "cancelled"
     ).order_by(Appointment.scheduled_at).all()
 
     amanha_inicio = (hoje + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     proximos = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
+        Appointment.tenant_id    == tid,
         Appointment.scheduled_at >= amanha_inicio,
         Appointment.scheduled_at <= amanha_inicio + timedelta(days=7),
-        Appointment.status != "cancelled"
+        Appointment.status       != "cancelled"
     ).order_by(Appointment.scheduled_at).all()
 
     historico = db.query(Appointment).filter(
@@ -600,23 +619,21 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     ).order_by(Appointment.scheduled_at.desc()).limit(200).all()
 
     pendentes_all = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
+        Appointment.tenant_id    == tid,
         Appointment.payment_status == "pending",
-        Appointment.status != "cancelled"
+        Appointment.status       != "cancelled"
     ).order_by(Appointment.scheduled_at.desc()).all()
 
     services_all = db.query(Service).filter(
         Service.tenant_id == tid
     ).order_by(Service.active.desc(), Service.name).all()
 
-    # Carrega customers e services em batch para todos os agendamentos
     all_appts = list({a.id: a for a in agendamentos_hoje + proximos + historico + pendentes_all}.values())
     all_cids  = [a.customer_id for a in all_appts]
     all_sids  = [a.service_id  for a in all_appts]
     cmap = _load_customers_map(db, tid, all_cids)
     smap = _load_services_map(db, tid, all_sids)
 
-    # ── Stats ────────────────────────────────────────────────────────────────
     total_clientes = db.query(Customer).filter(Customer.tenant_id == tid).count()
     em_atendimento = db.query(Appointment).filter(
         Appointment.tenant_id == tid, Appointment.status == "in_progress"
@@ -627,23 +644,23 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
 
     mes_inicio = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     appts_mes_pagos = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
+        Appointment.tenant_id    == tid,
         Appointment.scheduled_at >= mes_inicio,
         Appointment.payment_status == "paid"
     ).all()
     sids_fat = list({a.service_id for a in appts_mes_pagos})
     smap_fat = _load_services_map(db, tid, sids_fat)
-    fat_mes = sum(
+    fat_mes  = sum(
         a.payment_amount if a.payment_amount
         else (smap_fat.get(a.service_id).price if smap_fat.get(a.service_id) else 0)
         for a in appts_mes_pagos
     )
 
     appts_mes_pend = db.query(Appointment).filter(
-        Appointment.tenant_id == tid,
-        Appointment.scheduled_at >= mes_inicio,
+        Appointment.tenant_id      == tid,
+        Appointment.scheduled_at   >= mes_inicio,
         Appointment.payment_status == "pending",
-        Appointment.status != "cancelled"
+        Appointment.status         != "cancelled"
     ).all()
     sids_pend = list({a.service_id for a in appts_mes_pend})
     smap_pend = _load_services_map(db, tid, sids_pend)
@@ -655,7 +672,6 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     fat_fmt          = f"R$ {fat_mes/100:.2f}"
     fat_pendente_fmt = f"R$ {fat_pendente/100:.2f}"
 
-    # Top serviço
     from collections import Counter
     svc_counts = Counter(a.service_id for a in historico if a.status != "cancelled")
     top_svc = ""
@@ -664,9 +680,8 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         if top_s:
             top_svc = top_s.name
 
-    # Onboarding
-    has_services = any(s.active for s in services_all)
-    has_appts    = bool(historico)
+    has_services    = any(s.active for s in services_all)
+    has_appts       = bool(historico)
     show_onboarding = not has_services and not has_appts
     onboarding_html = ""
     if show_onboarding:
@@ -685,11 +700,20 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         )
         onboarding_html = f'<div class="card" style="border-color:var(--accent);background:var(--accent-bg)"><div class="section-title" style="color:var(--accent)">🚀 Bem-vindo! Configure sua agenda em 4 passos</div>{steps_html}</div>'
 
-    # ── Helper: botão de pagamento ────────────────────────────────────────────
+    # Banner de plano básico (CSV bloqueado)
+    plano_banner = ""
+    if plano == "basico":
+        svc_count  = sum(1 for s in services_all if s.active)
+        svc_aviso  = f" — {svc_count}/7 serviços usados" if True else ""
+        plano_banner = f"""<div style="background:var(--warn-bg);border:1px solid rgba(198,125,0,.3);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--warn);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <span>⭐ <strong>Plano Básico</strong>{svc_aviso} · Sem relatório CSV · Sem lembretes automáticos</span>
+            <span style="font-size:11px;opacity:.7">Faça upgrade para Pro ou Agência para desbloquear</span>
+        </div>"""
+
     def _pay_btn(a):
-        svc = smap.get(a.service_id)
+        svc       = smap.get(a.service_id)
         price_val = (svc.price / 100) if svc and svc.price else 0
-        ps = getattr(a, 'payment_status', 'pending') or 'pending'
+        ps        = getattr(a, 'payment_status', 'pending') or 'pending'
         pl, pbg, pc = PAYMENT_LABELS.get(ps, ("💳 Pend.", "#fff8e1", "#c67d00"))
         return (
             f'<button class="pay-btn" onclick="openPayModal(\'{a.id}\', {price_val})" '
@@ -703,14 +727,13 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         cards_hoje = '<div class="empty-state">Nenhum agendamento para hoje 🎉</div>'
     else:
         for a in agendamentos_hoje:
-            customer = cmap.get(a.customer_id)
-            service  = smap.get(a.service_id)
+            customer     = cmap.get(a.customer_id)
+            service      = smap.get(a.service_id)
             nome_cliente = (customer.name or customer.phone) if customer else "Cliente"
             nome_servico = service.name if service else "Serviço"
-            horario  = a.scheduled_at.strftime("%H:%M")
+            horario      = a.scheduled_at.strftime("%H:%M")
             label, bg, color = STATUS_LABELS.get(a.status, ("Confirmado", "#e8f5e9", "#2e7d32"))
 
-            # Linha de pet (só tipos que têm sujeito)
             pet_html = ""
             if show_pet and a.pet_name:
                 pet_info = a.pet_name
@@ -718,10 +741,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
                 if a.pet_weight: pet_info += f" · {a.pet_weight}kg"
                 pet_html = f'<div class="appt-pet">{tenant_icon} {pet_info}</div>'
 
-            # Busca (horário)
-            pickup_html = f'<div class="pickup">🏠 Busca: {a.pickup_time}</div>' if a.pickup_time else ""
-
-            # Endereço (LGPD: só aparece no painel do dono, nunca em log)
+            pickup_html  = f'<div class="pickup">🏠 Busca: {a.pickup_time}</div>' if a.pickup_time else ""
             address_html = ""
             if needs_address and getattr(a, 'pickup_address', None):
                 address_html = f'<div class="pickup" style="color:var(--success)">📍 {address_label}: {a.pickup_address}</div>'
@@ -737,8 +757,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
                     <div class="appt-client">👤 {nome_cliente}</div>
                     {pet_html}
                     <div class="appt-service">✂️ {nome_servico}</div>
-                    {pickup_html}
-                    {address_html}
+                    {pickup_html}{address_html}
                 </div>
                 <div class="appt-actions">
                     <div class="status-badge" style="background:{bg};color:{color}">{label}</div>
@@ -749,9 +768,8 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             </div>"""
 
     # ── Próximos 7 dias ───────────────────────────────────────────────────────
-    # Cabeçalho adaptativo
     prox_cols = ["Data/Hora", "Cliente"]
-    if show_pet:    prox_cols += [subject, "Raça/Peso"]
+    if show_pet:      prox_cols += [subject, "Raça/Peso"]
     prox_cols += ["Serviço", "Busca"]
     if needs_address: prox_cols.append(address_label)
     prox_cols += ["Status", "Pgto", ""]
@@ -762,14 +780,14 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         rows_proximos = f'<tr><td colspan="{len(prox_cols)}" class="empty-row">Nenhum agendamento nos próximos 7 dias.</td></tr>'
     else:
         for a in proximos:
-            customer = cmap.get(a.customer_id)
-            service  = smap.get(a.service_id)
+            customer     = cmap.get(a.customer_id)
+            service      = smap.get(a.service_id)
             nome_cliente = (customer.name or customer.phone) if customer else "Cliente"
             nome_servico = service.name if service else "Serviço"
             label, bg, color = STATUS_LABELS.get(a.status, ("Confirmado", "#e8f5e9", "#2e7d32"))
-            ps = getattr(a, 'payment_status', 'pending') or 'pending'
-            pl, pbg, pc = PAYMENT_LABELS.get(ps, ("💳 Pend.", "#fff8e1", "#c67d00"))
-            price_val = (service.price / 100) if service and service.price else 0
+            ps           = getattr(a, 'payment_status', 'pending') or 'pending'
+            pl, pbg, pc  = PAYMENT_LABELS.get(ps, ("💳 Pend.", "#fff8e1", "#c67d00"))
+            price_val    = (service.price / 100) if service and service.price else 0
 
             row = f"<td>{a.scheduled_at.strftime('%d/%m %H:%M')}</td><td>{nome_cliente}</td>"
             if show_pet:
@@ -791,17 +809,17 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         rows_historico = '<tr><td colspan="8" class="empty-row">Nenhum histórico.</td></tr>'
     else:
         for a in historico:
-            customer = cmap.get(a.customer_id)
-            service  = smap.get(a.service_id)
+            customer     = cmap.get(a.customer_id)
+            service      = smap.get(a.service_id)
             nome_cliente = (customer.name or customer.phone) if customer else "Cliente"
             nome_servico = service.name if service else "Serviço"
             label, bg, color = STATUS_LABELS.get(a.status, ("Confirmado", "#e8f5e9", "#2e7d32"))
-            ps = getattr(a, 'payment_status', 'pending') or 'pending'
-            pl, pbg, pc = PAYMENT_LABELS.get(ps, ("💳 Pend.", "#fff8e1", "#c67d00"))
-            price_raw = a.payment_amount or (service.price if service else 0) or 0
-            price_str = f"R$ {price_raw/100:.2f}" if price_raw else "-"
-            price_val = (service.price / 100) if service and service.price else 0
-            criado    = a.created_at.strftime("%d/%m/%Y") if a.created_at else "-"
+            ps           = getattr(a, 'payment_status', 'pending') or 'pending'
+            pl, pbg, pc  = PAYMENT_LABELS.get(ps, ("💳 Pend.", "#fff8e1", "#c67d00"))
+            price_raw    = a.payment_amount or (service.price if service else 0) or 0
+            price_str    = f"R$ {price_raw/100:.2f}" if price_raw else "-"
+            price_val    = (service.price / 100) if service and service.price else 0
+            criado       = a.created_at.strftime("%d/%m/%Y") if a.created_at else "-"
             rows_historico += f"""<tr>
                 <td>{a.scheduled_at.strftime("%d/%m/%Y %H:%M")}</td>
                 <td>{nome_cliente}</td>
@@ -819,13 +837,13 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         rows_pendentes = '<tr><td colspan="7" class="empty-row">🎉 Nenhum pagamento pendente!</td></tr>'
     else:
         for a in pendentes_all:
-            customer = cmap.get(a.customer_id)
-            service  = smap.get(a.service_id)
+            customer     = cmap.get(a.customer_id)
+            service      = smap.get(a.service_id)
             nome_cliente = (customer.name or customer.phone) if customer else "Cliente"
             nome_servico = service.name if service else "Serviço"
-            price_val = (service.price / 100) if service and service.price else 0
-            sl, sbg, sc = STATUS_LABELS.get(a.status, ("Confirmado", "#e8f5e9", "#2e7d32"))
-            pet_td = f"<td>{a.pet_name or '-'}</td>" if show_pet else ""
+            price_val    = (service.price / 100) if service and service.price else 0
+            sl, sbg, sc  = STATUS_LABELS.get(a.status, ("Confirmado", "#e8f5e9", "#2e7d32"))
+            pet_td       = f"<td>{a.pet_name or '-'}</td>" if show_pet else ""
             rows_pendentes += f"""<tr>
                 <td>{a.scheduled_at.strftime("%d/%m/%Y %H:%M")}</td>
                 <td>{nome_cliente}</td>
@@ -839,6 +857,12 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     pend_th_pet = f"<th>{subject}</th>" if show_pet else ""
 
     # ── Serviços ──────────────────────────────────────────────────────────────
+    svc_count_active = sum(1 for s in services_all if s.active)
+    svc_limite_html  = ""
+    if not pode_svc_ilimit:
+        cor = "#fc8181" if svc_count_active >= 7 else "#9aa0b8"
+        svc_limite_html = f'<div style="font-size:12px;color:{cor};margin-bottom:12px">Plano Básico: {svc_count_active}/7 serviços ativos. {"⚠️ Limite atingido." if svc_count_active >= 7 else ""}</div>'
+
     svc_rows = ""
     for s in services_all:
         active_badge = '<span class="badge badge-green">Ativo</span>' if s.active else '<span class="badge badge-gray">Inativo</span>'
@@ -869,24 +893,50 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         for s in services_all if s.active
     )
 
-    # ── Aba Configurações (nova — Etapa 6) ────────────────────────────────────
-    open_days_list = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
-    days_btns = ''.join(
+    # Add service form — esconde se limite atingido no básico
+    add_svc_bloqueado = (not pode_svc_ilimit and svc_count_active >= 7)
+    add_svc_form = ""
+    if add_svc_bloqueado:
+        add_svc_form = '<div class="alert-info" style="background:var(--warn-bg);color:var(--warn);border:1px solid rgba(198,125,0,.3);padding:12px 16px;border-radius:8px;font-size:13px;margin-top:14px">⚠️ Limite de 7 serviços do Plano Básico atingido. Faça upgrade para o Plano Pro para adicionar mais.</div>'
+    else:
+        add_svc_form = f"""
+        <div class="add-svc-form">
+            <div class="add-svc-title">➕ Adicionar novo serviço</div>
+            <div class="form-row2">
+                <div class="form-group" style="margin:0"><label>Nome *</label><input id="ns_name" placeholder="Ex: Corte + Barba"></div>
+                <div class="form-group" style="margin:0"><label>Preço (R$)</label><input id="ns_price" type="number" step="0.01" placeholder="50.00"></div>
+                <div class="form-group" style="margin:0"><label>Duração (min)</label><input id="ns_dur" type="number" value="60"></div>
+                <div style="display:flex;align-items:flex-end"><button class="btn-submit" onclick="addService()" style="padding:9px 16px;margin:0;width:auto">Adicionar</button></div>
+            </div>
+            <div class="form-group" style="margin-top:10px;margin-bottom:0">
+                <label>Descrição (para o bot)</label>
+                <input id="ns_desc" placeholder="Ex: Inclui lavagem e finalização">
+            </div>
+        </div>"""
+
+    # ── Aba Configurações ─────────────────────────────────────────────────────
+    open_days_list     = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
+    days_btns          = ''.join(
         f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" '
         f'data-day="{i}" onclick="toggleConfigDay(this)">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
-    bot_active_checked     = 'checked' if getattr(tenant, 'bot_active', True) else ''
-    notify_checked         = 'checked' if getattr(tenant, 'notify_new_appt', True) else ''
-    current_open           = getattr(tenant, 'open_time', '09:00') or '09:00'
-    current_close          = getattr(tenant, 'close_time', '18:00') or '18:00'
-    current_owner_phone    = getattr(tenant, 'owner_phone', '') or ''
-    current_attendant      = getattr(tenant, 'bot_attendant_name', 'Mari') or 'Mari'
-    plan_label             = {"basico": "⭐ Básico", "pro": "🚀 Pro", "agencia": "🏢 Agência"}.get(
-                                getattr(tenant, 'plan', 'basico') or 'basico', "⭐ Básico")
-    plan_active            = getattr(tenant, 'plan_active', True)
-    plan_badge_cls         = "badge-green" if plan_active else "badge-red"
-    plan_badge_txt         = "Ativo" if plan_active else "Suspenso"
+    bot_active_checked  = 'checked' if getattr(tenant, 'bot_active', True) else ''
+    notify_checked      = 'checked' if getattr(tenant, 'notify_new_appt', True) else ''
+    current_open        = getattr(tenant, 'open_time', '09:00') or '09:00'
+    current_close       = getattr(tenant, 'close_time', '18:00') or '18:00'
+    current_owner_phone = getattr(tenant, 'owner_phone', '') or ''
+    current_attendant   = getattr(tenant, 'bot_attendant_name', 'Mari') or 'Mari'
+    plan_badge_cls      = "badge-green" if plan_active else "badge-red"
+    plan_badge_txt      = "Ativo" if plan_active else "Suspenso"
+
+    lembretes_info = ""
+    if not pode_lembretes:
+        lembretes_info = '<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠️ Lembretes automáticos disponíveis apenas nos planos Pro e Agência.</div>'
+
+    csv_info = ""
+    if not pode_csv:
+        csv_info = '<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠️ Exportação CSV disponível apenas nos planos Pro e Agência.</div>'
 
     # ── Slots para o modal ────────────────────────────────────────────────────
     open_time  = getattr(tenant, 'open_time', '09:00') or '09:00'
@@ -908,7 +958,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     mes_atual  = hoje.strftime("%Y-%m")
     mes_label  = hoje.strftime("%B/%Y").capitalize()
 
-    # Campo de endereço no modal — só aparece se needs_address=True
+    # Campo endereço no modal
     address_modal_field = ""
     if needs_address:
         address_modal_field = f"""
@@ -917,8 +967,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             <input type="text" id="f_address" placeholder="Ex: Rua das Flores, 123 — Centro">
         </div>"""
 
-    # Campos de pet no modal — só para tipos que têm sujeito
-    pet_modal_fields = ""
+    # Campos pet no modal
     if show_pet:
         pet_modal_fields = f"""
         <div class="form-row">
@@ -947,6 +996,13 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             <label>✂️ Serviço *</label>
             <select id="f_service">{service_options}</select>
         </div>"""
+
+    # Botão CSV — desabilitado no básico
+    csv_btn_html = ""
+    if pode_csv:
+        csv_btn_html = f'<a href="/api/export/relatorio?mes={mes_atual}" class="btn-icon" title="Exportar {mes_label}" style="text-decoration:none">📥</a>'
+    else:
+        csv_btn_html = f'<button class="btn-icon" title="CSV disponível no Plano Pro" onclick="showToast(\'📊 Exportação CSV disponível no Plano Pro e Agência\')" style="opacity:.4;cursor:not-allowed">📥</button>'
 
     # ─────────────────────────────────────────────────────────────────────────
     # HTML principal
@@ -985,8 +1041,6 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
 }}
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}}
-
-/* Header */
 .header{{background:var(--header-bg);color:var(--header-text);padding:0 24px;height:56px;
     display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100;
     box-shadow:0 2px 12px var(--shadow)}}
@@ -1002,11 +1056,7 @@ body{{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);mi
     cursor:pointer;font-size:13px;font-weight:700;font-family:'DM Sans',sans-serif;
     display:flex;align-items:center;gap:5px;transition:background .15s}}
 .btn-primary:hover{{background:var(--accent2)}}
-
-/* Layout */
 .container{{max-width:1300px;margin:0 auto;padding:20px}}
-
-/* Tabs */
 .tabs{{display:flex;gap:4px;margin-bottom:20px;background:var(--surface);
     border:1px solid var(--border);border-radius:12px;padding:4px;width:fit-content;flex-wrap:wrap}}
 .tab{{padding:8px 16px;border-radius:9px;border:none;background:transparent;
@@ -1014,8 +1064,6 @@ body{{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);mi
     font-family:'DM Sans',sans-serif;transition:all .15s;white-space:nowrap}}
 .tab.active{{background:var(--accent);color:white}}
 .tab-content{{display:none}}.tab-content.active{{display:block}}
-
-/* Stats */
 .stats{{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:18px}}
 @media(max-width:1000px){{.stats{{grid-template-columns:repeat(3,1fr)}}}}
 @media(max-width:600px){{.stats{{grid-template-columns:repeat(2,1fr)}}}}
@@ -1026,16 +1074,12 @@ body{{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);mi
 .stat-label{{font-size:11px;color:var(--text3);margin-top:3px;font-weight:500}}
 .stat-card.warn{{border-color:#c67d0060;background:var(--warn-bg)}}
 .stat-card.warn .stat-number{{color:var(--warn)}}
-
-/* Cards */
 .card{{background:var(--surface);border-radius:14px;padding:18px;
     border:1px solid var(--border);margin-bottom:16px}}
 .section-title{{font-size:14px;font-weight:700;color:var(--text);
     display:flex;align-items:center;gap:7px;margin-bottom:14px}}
 .badge-count{{background:var(--accent-bg);color:var(--accent);
     font-size:11px;padding:2px 7px;border-radius:20px;font-weight:700}}
-
-/* Appointment cards */
 .appt-card{{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;
     border-radius:10px;border:1px solid var(--border);margin-bottom:8px;
     background:var(--surface2);transition:box-shadow .2s,border-color .2s}}
@@ -1062,8 +1106,6 @@ body{{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);mi
     font-weight:600;font-family:'DM Sans',sans-serif;white-space:nowrap}}
 .btn-pay-now:hover{{background:#c67d00;color:white}}
 .empty-state{{color:var(--text3);text-align:center;padding:28px;font-size:13px}}
-
-/* Table */
 .table-wrap{{overflow-x:auto}}
 table{{width:100%;border-collapse:collapse}}
 th{{text-align:left;font-size:10px;color:var(--text3);font-weight:600;
@@ -1077,8 +1119,6 @@ tr:hover td{{background:var(--surface2)}}
 .badge-green{{background:var(--success-bg);color:var(--success)}}
 .badge-red{{background:var(--danger-bg);color:var(--danger)}}
 .badge-gray{{background:var(--surface2);color:var(--text3)}}
-
-/* Serviços */
 .service-edit-row{{display:flex;align-items:center;gap:10px;padding:11px 14px;
     border:1px solid var(--border);border-radius:10px;margin-bottom:8px;
     background:var(--surface2);flex-wrap:wrap}}
@@ -1099,8 +1139,6 @@ tr:hover td{{background:var(--surface2)}}
 .add-svc-title{{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px}}
 .form-row2{{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:end}}
 @media(max-width:600px){{.form-row2{{grid-template-columns:1fr 1fr}}}}
-
-/* Configurações */
 .config-section{{margin-bottom:22px}}
 .config-section-title{{font-size:12px;font-weight:700;color:var(--text3);
     text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;
@@ -1127,8 +1165,6 @@ tr:hover td{{background:var(--surface2)}}
 .day-btn.active{{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}}
 .plan-info{{background:var(--surface2);border:1px solid var(--border);border-radius:10px;
     padding:14px 16px;display:flex;align-items:center;justify-content:space-between}}
-
-/* Modal */
 .modal-overlay{{position:fixed;inset:0;background:var(--overlay);z-index:200;
     display:flex;align-items:center;justify-content:center;
     opacity:0;pointer-events:none;transition:opacity .25s;backdrop-filter:blur(4px)}}
@@ -1163,8 +1199,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:4px;transition:background .15s}}
 .btn-submit:hover{{background:var(--accent2)}}
 .btn-submit:disabled{{opacity:.5;cursor:not-allowed}}
-
-/* Pagamento */
 .pay-method-grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:6px}}
 .pay-method-btn{{padding:10px;border:2px solid var(--border);border-radius:9px;
     background:var(--surface2);cursor:pointer;font-size:13px;font-weight:600;
@@ -1172,8 +1206,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
 .pay-method-btn:hover,.pay-method-btn.active{{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}}
 .pix-section{{background:var(--success-bg);border:1px solid rgba(46,125,50,.3);border-radius:10px;padding:12px;margin-top:10px}}
 .pix-review-box{{background:var(--warn-bg);border:1px solid rgba(198,125,0,.3);border-radius:10px;padding:12px;margin-top:10px;font-size:12px;color:var(--warn)}}
-
-/* Misc */
 .search-box{{display:flex;gap:8px;margin-bottom:14px}}
 .search-input{{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:9px;
     background:var(--input-bg);color:var(--text);font-size:13px;
@@ -1188,7 +1220,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
 .spinner{{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);
     border-top-color:white;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}}
 @keyframes spin{{to{{transform:rotate(360deg)}}}}
-
 @media(max-width:600px){{
     .appt-card{{flex-direction:column}}
     .appt-actions{{width:100%;flex-direction:row;flex-wrap:wrap}}
@@ -1208,7 +1239,7 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
         <span style="font-size:11px;opacity:.5;font-family:'DM Mono',monospace">{hoje.strftime("%d/%m %H:%M")}</span>
         {bot_badge}
         <button class="btn-primary" onclick="openModal()"><span>+</span> Agendar</button>
-        <a href="/api/export/relatorio?mes={mes_atual}" class="btn-icon" title="Exportar {mes_label}" style="text-decoration:none">📥</a>
+        {csv_btn_html}
         <button class="btn-icon" onclick="toggleTheme()" id="theme-btn" title="Tema">🌙</button>
         <button class="btn-icon" onclick="refreshData()" title="Atualizar" id="refresh-btn">↻</button>
         <a href="/dashboard/logout" class="btn-icon" title="Sair" style="text-decoration:none">🚪</a>
@@ -1216,6 +1247,7 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
 </div>
 
 <div class="container">
+{plano_banner}
 {onboarding_html}
 
 <div class="stats">
@@ -1228,12 +1260,12 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
 </div>
 
 <div class="tabs">
-    <button class="tab active"  onclick="switchTab('hoje',this)">📋 Hoje</button>
-    <button class="tab"         onclick="switchTab('proximos',this)">📆 Próximos 7 dias</button>
-    <button class="tab"         onclick="switchTab('pendentes',this)">⏳ Pgtos <span class="badge-count">{len(pendentes_all)}</span></button>
-    <button class="tab"         onclick="switchTab('historico',this)">📁 Histórico</button>
-    <button class="tab"         onclick="switchTab('servicos',this)">✂️ Serviços</button>
-    <button class="tab"         onclick="switchTab('config',this)">⚙️ Configurações</button>
+    <button class="tab active" onclick="switchTab('hoje',this)">📋 Hoje</button>
+    <button class="tab"        onclick="switchTab('proximos',this)">📆 Próximos 7 dias</button>
+    <button class="tab"        onclick="switchTab('pendentes',this)">⏳ Pgtos <span class="badge-count">{len(pendentes_all)}</span></button>
+    <button class="tab"        onclick="switchTab('historico',this)">📁 Histórico</button>
+    <button class="tab"        onclick="switchTab('servicos',this)">✂️ Serviços</button>
+    <button class="tab"        onclick="switchTab('config',this)">⚙️ Config</button>
 </div>
 
 <!-- Hoje -->
@@ -1273,7 +1305,7 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     <div class="card">
         <div class="section-title" style="justify-content:space-between">
             <span>📁 Histórico <span style="font-size:11px;color:var(--text3);font-weight:400">(últimos 200)</span></span>
-            <a href="/api/export/relatorio?mes={mes_atual}" class="btn-save-svc" style="font-size:11px;padding:4px 10px;text-decoration:none">📥 CSV {mes_label}</a>
+            {'<a href="/api/export/relatorio?mes=' + mes_atual + '" class="btn-save-svc" style="font-size:11px;padding:4px 10px;text-decoration:none">📥 CSV ' + mes_label + '</a>' if pode_csv else '<span style="font-size:11px;color:var(--text3)">📥 CSV disponível no Plano Pro</span>'}
         </div>
         <div class="search-box">
             <input class="search-input" id="search-input" placeholder="🔍 Buscar por cliente, {subject.lower()}, serviço..." oninput="filterTable()">
@@ -1289,26 +1321,15 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
 <div id="tab-servicos" class="tab-content">
     <div class="card">
         <div class="section-title">✂️ Seus serviços</div>
-        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Edite preço e duração. A IA usa esses valores em tempo real.</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Edite preço e duração. A IA usa esses valores em tempo real.</div>
+        {svc_limite_html}
         {("" if svc_rows else '<div class="empty-state">Nenhum serviço. Adicione abaixo!</div>') + svc_rows}
         {"<div style='font-size:12px;color:var(--text3);margin-top:8px;padding:10px 14px;background:var(--accent-bg);border-radius:8px'>⭐ Mais agendado: <strong>" + top_svc + "</strong></div>" if top_svc else ""}
-        <div class="add-svc-form">
-            <div class="add-svc-title">➕ Adicionar novo serviço</div>
-            <div class="form-row2">
-                <div class="form-group" style="margin:0"><label>Nome *</label><input id="ns_name" placeholder="Ex: Corte + Barba"></div>
-                <div class="form-group" style="margin:0"><label>Preço (R$)</label><input id="ns_price" type="number" step="0.01" placeholder="50.00"></div>
-                <div class="form-group" style="margin:0"><label>Duração (min)</label><input id="ns_dur" type="number" value="60"></div>
-                <div style="display:flex;align-items:flex-end"><button class="btn-submit" onclick="addService()" style="padding:9px 16px;margin:0;width:auto">Adicionar</button></div>
-            </div>
-            <div class="form-group" style="margin-top:10px;margin-bottom:0">
-                <label>Descrição (para o bot)</label>
-                <input id="ns_desc" placeholder="Ex: Inclui lavagem e finalização">
-            </div>
-        </div>
+        {add_svc_form}
     </div>
 </div>
 
-<!-- Configurações (Etapa 6) -->
+<!-- Configurações -->
 <div id="tab-config" class="tab-content">
     <div class="card">
         <div class="section-title">⚙️ Configurações do negócio</div>
@@ -1324,6 +1345,8 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
                 </div>
                 <span class="badge {plan_badge_cls}">{plan_badge_txt}</span>
             </div>
+            {csv_info}
+            {lembretes_info}
         </div>
 
         <!-- Bot -->
@@ -1466,7 +1489,7 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
             <div style="font-size:11px;color:var(--success);margin-top:6px">💡 Cole o ID para rastreio e auditoria</div>
         </div>
         <div class="pix-review-box">
-            ⚠️ <strong>Atenção:</strong> Confirme no seu app bancário antes de registrar. Nunca confirme só pela imagem do cliente.
+            ⚠️ <strong>Atenção:</strong> Confirme no seu app bancário antes de registrar.
         </div>
     </div>
     <div class="form-group" style="margin-top:12px">
@@ -1489,7 +1512,7 @@ const ALL_SLOTS  = {slots_json};
 const SHOW_PET   = {'true' if show_pet else 'false'};
 const NEEDS_ADDR = {'true' if needs_address else 'false'};
 
-// ── Tema ──────────────────────────────────────────────────────────────────────
+// Tema
 const savedTheme = localStorage.getItem('theme') || 'light';
 document.documentElement.setAttribute('data-theme', savedTheme);
 document.getElementById('theme-btn').textContent = savedTheme === 'dark' ? '☀️' : '🌙';
@@ -1500,7 +1523,7 @@ function toggleTheme() {{
     document.getElementById('theme-btn').textContent = n === 'dark' ? '☀️' : '🌙';
 }}
 
-// ── Tabs ──────────────────────────────────────────────────────────────────────
+// Tabs
 function switchTab(name, btn) {{
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -1508,7 +1531,7 @@ function switchTab(name, btn) {{
     btn.classList.add('active');
 }}
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
+// Toast
 function showToast(msg) {{
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -1516,7 +1539,7 @@ function showToast(msg) {{
     setTimeout(() => t.classList.remove('show'), 2800);
 }}
 
-// ── Refresh inteligente (sem recarregar durante modal aberto) ─────────────────
+// Auto refresh
 let refreshTimer = null;
 function scheduleRefresh() {{
     clearTimeout(refreshTimer);
@@ -1525,7 +1548,7 @@ function scheduleRefresh() {{
             id => document.getElementById(id).classList.contains('open')
         );
         if (!modalsOpen) location.reload();
-        else scheduleRefresh(); // reagenda se modal aberto
+        else scheduleRefresh();
     }}, 60000);
 }}
 function refreshData() {{
@@ -1535,11 +1558,10 @@ function refreshData() {{
 }}
 scheduleRefresh();
 
-// ── Status ────────────────────────────────────────────────────────────────────
+// Status
 async function updateStatus(id, status) {{
     const r = await fetch(`/api/appointment/${{id}}/status`, {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{status}})
     }});
     const d = await r.json();
@@ -1555,11 +1577,11 @@ async function cancelAppt(id) {{
     else showToast('❌ Erro ao cancelar');
 }}
 
-// ── Modal agendamento ─────────────────────────────────────────────────────────
+// Modal agendamento
 function openModal() {{
     document.getElementById('modalOverlay').classList.add('open');
     const today = new Date().toISOString().split('T')[0];
-    document.getElementById('f_date').min = today;
+    document.getElementById('f_date').min   = today;
     document.getElementById('f_date').value = today;
     loadSlots();
 }}
@@ -1588,10 +1610,10 @@ async function loadSlots() {{
     }} else {{
         ALL_SLOTS.forEach(slot => {{
             const isBusy = busy.includes(slot);
-            const btn = document.createElement('button');
+            const btn    = document.createElement('button');
             btn.textContent = slot;
-            btn.className = 'slot-btn' + (isBusy ? ' busy' : '');
-            btn.disabled = isBusy;
+            btn.className   = 'slot-btn' + (isBusy ? ' busy' : '');
+            btn.disabled    = isBusy;
             if (!isBusy) btn.onclick = () => selectSlot(slot, btn);
             grid.appendChild(btn);
         }});
@@ -1612,36 +1634,33 @@ async function submitAppt() {{
     const time       = document.getElementById('f_time').value;
     const pickup     = document.getElementById('f_pickup').value;
     const address    = NEEDS_ADDR ? (document.getElementById('f_address')?.value || '') : '';
-
-    const pet     = SHOW_PET ? document.getElementById('f_pet')?.value.trim() : '';
-    const breed   = SHOW_PET ? document.getElementById('f_breed')?.value.trim() : '';
-    const weight  = SHOW_PET ? document.getElementById('f_weight')?.value : '';
+    const pet        = SHOW_PET ? document.getElementById('f_pet')?.value.trim() : '';
+    const breed      = SHOW_PET ? document.getElementById('f_breed')?.value.trim() : '';
+    const weight     = SHOW_PET ? document.getElementById('f_weight')?.value : '';
 
     if (!customer || !service_id || !date || !time) {{
         showToast('⚠️ Preencha todos os campos obrigatórios e escolha um horário');
         return;
     }}
-    if (SHOW_PET && !pet) {{ showToast(`⚠️ Informe o nome do {subject}`); return; }}
+    if (SHOW_PET && !pet) {{ showToast('⚠️ Informe o nome do {subject}'); return; }}
     if (NEEDS_ADDR && !address.trim()) {{ showToast('⚠️ Informe o endereço'); return; }}
 
     const btn = document.getElementById('btn-submit');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Salvando...';
+    btn.disabled    = true;
+    btn.innerHTML   = '<span class="spinner"></span> Salvando...';
 
     try {{
         const payload = {{
-            customer_name: customer,
-            service_id,
+            customer_name: customer, service_id,
             scheduled_at: date + 'T' + time + ':00',
             pickup_time:    pickup || null,
             pickup_address: address || null,
-            pet_name:   pet || null,
-            pet_breed:  breed || null,
+            pet_name:   pet    || null,
+            pet_breed:  breed  || null,
             pet_weight: weight ? parseFloat(weight) : null,
         }};
         const r = await fetch('/api/appointment/create', {{
-            method: 'POST',
-            headers: {{'Content-Type': 'application/json'}},
+            method: 'POST', headers: {{'Content-Type': 'application/json'}},
             body: JSON.stringify(payload),
         }});
         const d = await r.json();
@@ -1652,14 +1671,12 @@ async function submitAppt() {{
         }} else {{
             showToast('❌ ' + (d.error || 'Erro ao agendar'));
         }}
-    }} catch(e) {{
-        showToast('❌ Erro de conexão');
-    }}
-    btn.disabled = false;
+    }} catch(e) {{ showToast('❌ Erro de conexão'); }}
+    btn.disabled  = false;
     btn.innerHTML = 'Confirmar Agendamento';
 }}
 
-// ── Modal pagamento ───────────────────────────────────────────────────────────
+// Modal pagamento
 function openPayModal(apptId, defaultAmount) {{
     document.getElementById('pay_appt_id').value = apptId;
     document.getElementById('pay_amount').value  = defaultAmount ? defaultAmount.toFixed(2) : '';
@@ -1679,19 +1696,18 @@ function selectPayMethod(method, btn) {{
     document.getElementById('pix_section').style.display = method === 'pix' ? 'block' : 'none';
 }}
 async function confirmPayment(status) {{
-    const apptId  = document.getElementById('pay_appt_id').value;
-    const amount  = document.getElementById('pay_amount').value;
-    const method  = document.getElementById('pay_method').value;
-    const notes   = document.getElementById('pay_notes').value;
-    const pixKey  = document.getElementById('pay_pix_key').value;
+    const apptId = document.getElementById('pay_appt_id').value;
+    const amount = document.getElementById('pay_amount').value;
+    const method = document.getElementById('pay_method').value;
+    const notes  = document.getElementById('pay_notes').value;
+    const pixKey = document.getElementById('pay_pix_key').value;
     if (status === 'paid' && !method) {{ showToast('⚠️ Selecione a forma de pagamento'); return; }}
     if (status === 'paid' && method === 'pix' && !pixKey) {{
         if (!confirm('⚠️ Confirmou o recebimento no seu banco?\\n\\nNão confirme sem verificar o extrato.')) return;
     }}
     try {{
         const r = await fetch(`/api/appointment/${{apptId}}/payment`, {{
-            method: 'POST',
-            headers: {{'Content-Type': 'application/json'}},
+            method: 'POST', headers: {{'Content-Type': 'application/json'}},
             body: JSON.stringify({{
                 payment_status: status, payment_method: method || null,
                 payment_amount: amount ? parseFloat(amount) : null,
@@ -1708,13 +1724,12 @@ async function confirmPayment(status) {{
     }} catch(e) {{ showToast('❌ Erro de conexão'); }}
 }}
 
-// ── Serviços ──────────────────────────────────────────────────────────────────
+// Serviços
 async function saveService(id) {{
     const price = document.getElementById('price-' + id).value;
     const dur   = document.getElementById('dur-' + id).value;
     const r = await fetch(`/api/service/${{id}}/update`, {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{price: parseFloat(price), duration_min: parseInt(dur)}}),
     }});
     const d = await r.json();
@@ -1735,8 +1750,7 @@ async function addService() {{
     const desc  = document.getElementById('ns_desc').value.trim();
     if (!name) {{ showToast('⚠️ Nome é obrigatório'); return; }}
     const r = await fetch('/api/service/create', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{name, price: parseFloat(price)||0, duration_min: parseInt(dur)||60, description: desc}}),
     }});
     const d = await r.json();
@@ -1744,7 +1758,7 @@ async function addService() {{
     else showToast('❌ ' + (d.error || 'Erro'));
 }}
 
-// ── Histórico: busca ──────────────────────────────────────────────────────────
+// Histórico busca
 function filterTable() {{
     const q = document.getElementById('search-input').value.toLowerCase();
     document.querySelectorAll('#historico-body tr').forEach(row => {{
@@ -1752,7 +1766,7 @@ function filterTable() {{
     }});
 }}
 
-// ── Configurações ─────────────────────────────────────────────────────────────
+// Configurações
 function toggleConfigDay(btn) {{
     btn.classList.toggle('active');
     const active = [...document.querySelectorAll('#cfg-days-grid .day-btn.active')].map(b => b.dataset.day);
@@ -1760,13 +1774,12 @@ function toggleConfigDay(btn) {{
 }}
 
 async function saveConfig() {{
-    const display_name      = document.getElementById('cfg_display_name').value.trim();
+    const display_name       = document.getElementById('cfg_display_name').value.trim();
     const bot_attendant_name = document.getElementById('cfg_attendant').value.trim();
-    const owner_phone       = document.getElementById('cfg_owner_phone').value.trim();
+    const owner_phone        = document.getElementById('cfg_owner_phone').value.trim();
     if (!display_name) {{ showToast('⚠️ Nome não pode ser vazio'); return; }}
     const r = await fetch('/api/tenant/config', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{display_name, bot_attendant_name, owner_phone}}),
     }});
     const d = await r.json();
@@ -1780,8 +1793,7 @@ async function saveHorarios() {{
     const open_days  = document.getElementById('cfg_open_days').value;
     if (!open_days) {{ showToast('⚠️ Selecione ao menos 1 dia'); return; }}
     const r = await fetch('/api/tenant/config', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{open_time, close_time, open_days}}),
     }});
     const d = await r.json();
@@ -1793,8 +1805,7 @@ async function saveToggle(field, value) {{
     const payload = {{}};
     payload[field] = value;
     const r = await fetch('/api/tenant/config', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify(payload),
     }});
     const d = await r.json();
@@ -1811,14 +1822,12 @@ async function changePassword() {{
     if (!current || !newpw) {{ showToast('⚠️ Preencha os dois campos'); return; }}
     if (newpw.length < 6) {{ showToast('⚠️ Nova senha deve ter ao menos 6 caracteres'); return; }}
     const r = await fetch('/api/tenant/password', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{current_password: current, new_password: newpw}}),
     }});
     const d = await r.json();
     if (d.success) {{
         showToast('✅ Senha alterada! Fazendo logout...');
-        // Atualiza cookie com novo token antes de redirecionar
         setTimeout(() => window.location.href = '/dashboard/logout?tid={tid}', 1500);
     }} else {{
         showToast('❌ ' + (d.error || 'Erro ao alterar senha'));
@@ -1833,10 +1842,10 @@ async function changePassword() {{
 def debug_tenants(db: Session = Depends(get_db)):
     tenants = db.query(Tenant).all()
     return [
-        {{
+        {
             "id": t.id,
             "name": t.name,
             "appointments": db.query(Appointment).filter(Appointment.tenant_id == t.id).count()
-        }}
+        }
         for t in tenants
     ]

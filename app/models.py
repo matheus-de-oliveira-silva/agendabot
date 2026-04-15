@@ -25,7 +25,7 @@ class Tenant(Base):
     display_name = Column(String, nullable=True)
     subject_label = Column(String, default="Pet")
     subject_label_plural = Column(String, default="Pets")
-    tenant_icon = Column(String, default="🐾")          # ← NOVO: ícone personalizável
+    tenant_icon = Column(String, default="🐾")
 
     # Bot
     bot_attendant_name = Column(String, default="Mari")
@@ -42,17 +42,18 @@ class Tenant(Base):
     notify_new_appt = Column(Boolean, default=True)
 
     # Endereço (busca / entrega)
-    needs_address = Column(Boolean, default=False)                        # coleta endereço do cliente?
-    address_label = Column(String, default="Endereço de busca")           # label exibido no painel e no bot
+    needs_address = Column(Boolean, default=False)
+    address_label = Column(String, default="Endereço de busca")
 
     # Onboarding self-service
-    setup_token = Column(String, nullable=True)   # token temporário do link /setup — anulado após uso
-    setup_done  = Column(Boolean, default=False)  # True quando o cliente concluiu o wizard
+    setup_token = Column(String, nullable=True)
+    setup_done  = Column(Boolean, default=False)
 
     # Plano SaaS
-    plan        = Column(String, default="basico")  # "basico" | "pro" | "agencia"
-    plan_active = Column(Boolean, default=True)     # False = assinatura cancelada, bot pausado
-    billing_email = Column(String, nullable=True)   # email do comprador na Hotmart/Kiwify
+    plan             = Column(String, default="basico")   # "basico" | "pro" | "agencia"
+    plan_active      = Column(Boolean, default=True)      # False = assinatura cancelada
+    billing_email    = Column(String, nullable=True)      # email do comprador na Kiwify
+    plan_tenant_group = Column(String, nullable=True)     # agência: email do comprador principal
 
 
 class Customer(Base):
@@ -105,7 +106,7 @@ class Appointment(Base):
     pet_weight = Column(Float)
     scheduled_at  = Column(DateTime, nullable=False)
     pickup_time   = Column(String)
-    pickup_address = Column(String, nullable=True)  # endereço de busca/entrega (quando needs_address=True)
+    pickup_address = Column(String, nullable=True)
     status = Column(String, default="confirmed")
     notes = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
@@ -120,14 +121,13 @@ class Appointment(Base):
 
 
 class BlockedSlot(Base):
-    """Horários bloqueados pelo dono — bot não agenda nesses períodos."""
     __tablename__ = "blocked_slots"
 
     id = Column(String, primary_key=True, default=generate_uuid)
     tenant_id = Column(String, nullable=False)
-    date = Column(String, nullable=False)           # "YYYY-MM-DD"
-    time = Column(String, nullable=True)            # "HH:MM" — None = dia inteiro bloqueado
-    reason = Column(String, nullable=True)          # "Férias", "Folga", etc.
+    date = Column(String, nullable=False)
+    time = Column(String, nullable=True)
+    reason = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
 

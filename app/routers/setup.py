@@ -19,7 +19,27 @@ ADDRESS_LABELS = [
     "Endereço do cliente",
 ]
 
-# ─── CSS / estilo base (mesmo visual do admin) ────────────────────────────────
+BUSINESS_TYPES = {
+    "petshop":   {"label": "🐾 Pet Shop",             "subject": "Pet",     "subject_plural": "Pets",     "icon": "🐾", "needs_address_suggest": True},
+    "clinica":   {"label": "🏥 Clínica Veterinária",  "subject": "Animal",  "subject_plural": "Animais",  "icon": "🏥", "needs_address_suggest": False},
+    "adocao":    {"label": "🐶 Clínica de Adoção",    "subject": "Animal",  "subject_plural": "Animais",  "icon": "🐶", "needs_address_suggest": False},
+    "barbearia": {"label": "💈 Barbearia",             "subject": "Cliente", "subject_plural": "Clientes", "icon": "💈", "needs_address_suggest": False},
+    "salao":     {"label": "💅 Salão de Beleza",       "subject": "Cliente", "subject_plural": "Clientes", "icon": "💅", "needs_address_suggest": False},
+    "estetica":  {"label": "✨ Estética",              "subject": "Cliente", "subject_plural": "Clientes", "icon": "✨", "needs_address_suggest": False},
+    "outro":     {"label": "⚙️ Outro",                "subject": "Cliente", "subject_plural": "Clientes", "icon": "⚙️", "needs_address_suggest": False},
+}
+
+SERVICOS_PADRAO = {
+    "petshop":   [("Banho Simples",60,4000,"#74b9ff","Banho com secagem"),("Banho e Tosa",90,7000,"#6C5CE7","Banho completo com tosa"),("Tosa Higiênica",45,3500,"#a29bfe","Limpeza higiênica"),("Consulta Veterinária",30,12000,"#00b894","Consulta com vet")],
+    "clinica":   [("Consulta Clínica",30,15000,"#00b894","Consulta geral"),("Vacinação",20,8000,"#55efc4","Aplicação de vacinas"),("Exame de Sangue",15,12000,"#fd79a8","Coleta e análise"),("Cirurgia",120,80000,"#e17055","Procedimento cirúrgico")],
+    "adocao":    [("Consulta Pré-adoção",30,0,"#00b894","Avaliação para adoção"),("Castração",90,35000,"#6C5CE7","Castração"),("Microchip",20,5000,"#74b9ff","Implante de microchip"),("Vacinação",20,6000,"#55efc4","Carteira de vacinação")],
+    "barbearia": [("Corte",30,4000,"#74b9ff","Corte masculino"),("Barba",20,3000,"#6C5CE7","Barba completa"),("Corte + Barba",50,6500,"#a29bfe","Combo completo"),("Sobrancelha",15,1500,"#00b894","Design de sobrancelha")],
+    "salao":     [("Corte Feminino",60,8000,"#fd79a8","Corte e finalização"),("Escova",45,6000,"#f0a500","Escova progressiva"),("Coloração",120,15000,"#6C5CE7","Coloração completa"),("Manicure",40,4000,"#00b894","Unhas mãos")],
+    "estetica":  [("Limpeza de Pele",60,9000,"#74b9ff","Limpeza profunda"),("Depilação",45,6000,"#fd79a8","Depilação a cera"),("Massagem",60,12000,"#00b894","Massagem relaxante"),("Design de Sobrancelha",30,5000,"#6C5CE7","Design completo")],
+    "outro":     [("Serviço Padrão",60,10000,"#6C5CE7","Descreva seu serviço")],
+}
+
+# ─── CSS base ─────────────────────────────────────────────────────────────────
 SETUP_STYLE = """
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
@@ -48,8 +68,6 @@ input:focus,select:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
 .alert-success{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}
 .alert-error{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}
 .alert-info{background:#1a1d3a;color:#a29bfe;border:1px solid rgba(162,155,254,.2)}
-
-/* Progress steps */
 .steps{display:flex;align-items:center;gap:0;margin-bottom:32px}
 .step-item{display:flex;flex-direction:column;align-items:center;flex:1}
 .step-circle{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;border:2px solid #2d3148;background:#0f1117;color:#9aa0b8;transition:all .3s}
@@ -59,58 +77,49 @@ input:focus,select:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
 .step-label.active{color:#7c7de8}
 .step-line{flex:1;height:2px;background:#2d3148;margin-top:-18px}
 .step-line.done{background:#68d391}
-
-/* Toggle */
 .toggle-switch{position:relative;display:inline-flex;align-items:center;gap:10px;cursor:pointer}
 .toggle-switch input{opacity:0;width:0;height:0}
 .slider{width:44px;height:24px;background:#2d3148;border-radius:12px;position:relative;transition:background .2s;flex-shrink:0}
 .slider:before{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}
 .toggle-switch input:checked + .slider{background:#5B5BD6}
 .toggle-switch input:checked + .slider:before{transform:translateX(20px)}
-
-/* Dias */
 .days-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .day-btn{padding:6px 14px;border-radius:8px;border:1px solid #2d3148;background:#0f1117;color:#9aa0b8;cursor:pointer;font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;transition:all .15s}
 .day-btn.active{background:#23254a;border-color:#7c7de8;color:#7c7de8}
-
-/* Serviços */
 .service-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117}
 .service-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
-
-/* WA connection */
 .conn-status{padding:14px 18px;border-radius:12px;font-size:14px;font-weight:600;text-align:center;margin-bottom:14px}
 .conn-loading{background:#1a1d3a;color:#a29bfe;border:1px solid #2d3148}
 .conn-ok{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}
 .conn-fail{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}
-
-/* Checklist */
 .check-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #2d3148}
 .check-row:last-child{border-bottom:none}
 .check-icon{font-size:18px;width:28px;text-align:center;flex-shrink:0}
 .check-label{font-size:14px;font-weight:600}
 .check-sub{font-size:12px;color:#9aa0b8;margin-top:2px}
-
-/* Senha */
 .pw-strength{height:4px;border-radius:2px;margin-top:6px;transition:all .3s}
-
-@media(max-width:600px){.grid2{grid-template-columns:1fr}.steps{gap:0}.step-label{display:none}}
+/* Passo 0 — seleção de tipo */
+.biz-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+.biz-card{padding:16px;border:2px solid #2d3148;border-radius:12px;background:#0f1117;cursor:pointer;text-align:center;transition:all .2s}
+.biz-card:hover{border-color:#7c7de8;background:#23254a}
+.biz-card.selected{border-color:#5B5BD6;background:#23254a;box-shadow:0 0 0 3px #23254a}
+.biz-icon{font-size:28px;margin-bottom:8px}
+.biz-label{font-size:13px;font-weight:700;color:#e8eaf2}
+@media(max-width:600px){.grid2{grid-template-columns:1fr}.steps{gap:0}.step-label{display:none}.biz-grid{grid-template-columns:1fr 1fr}}
 </style>
 """
 
 def _steps_html(current: int) -> str:
-    labels = ["Negócio", "Horários", "Serviços", "WhatsApp", "Finalizar"]
+    # Agora temos 6 passos (0 a 5, exibidos como 1 a 6)
+    labels = ["Negócio", "Dados", "Horários", "Serviços", "WhatsApp", "Finalizar"]
     items = ""
     for i, label in enumerate(labels, 1):
         if i < current:
-            circle_cls = "done"
-            circle_content = "✓"
+            circle_cls, circle_content = "done", "✓"
         elif i == current:
-            circle_cls = "active"
-            circle_content = str(i)
+            circle_cls, circle_content = "active", str(i)
         else:
-            circle_cls = ""
-            circle_content = str(i)
-
+            circle_cls, circle_content = "", str(i)
         label_cls = "active" if i == current else ""
         items += f'<div class="step-item"><div class="step-circle {circle_cls}">{circle_content}</div><div class="step-label {label_cls}">{label}</div></div>'
         if i < len(labels):
@@ -136,20 +145,24 @@ def _error_page(msg: str) -> HTMLResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PASSO 1 — Confirmar nome do negócio e atendente
+# PASSO 0 — Escolha do tipo de negócio (NOVO)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/setup", response_class=HTMLResponse)
-def setup_step1(request: Request, token: str = "", db: Session = Depends(get_db)):
+def setup_step0(request: Request, token: str = "", db: Session = Depends(get_db)):
     if not token:
-        return _error_page("Nenhum token fornecido. Verifique o link que você recebeu por email.")
+        return _error_page("Nenhum token fornecido. Verifique o link que você recebeu.")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
         return _error_page("Este link é inválido ou já foi utilizado. Entre em contato com o suporte.")
 
-    display = tenant.display_name or tenant.name or ""
-    attendant = getattr(tenant, 'bot_attendant_name', 'Mari') or 'Mari'
-    biz_name = getattr(tenant, 'bot_business_name', '') or display
+    biz_cards = ""
+    for key, info in BUSINESS_TYPES.items():
+        biz_cards += f"""
+        <div class="biz-card" id="biz-{key}" onclick="selectBiz('{key}')">
+            <div class="biz-icon">{info['icon']}</div>
+            <div class="biz-label">{info['label']}</div>
+        </div>"""
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -160,7 +173,98 @@ def setup_step1(request: Request, token: str = "", db: Session = Depends(get_db)
 
 <div class="card">
   <div class="card-title">👋 Bem-vindo ao AgendaBot!</div>
-  <div class="card-sub">Vamos configurar tudo em 5 passos simples. Confirme as informações básicas do seu negócio abaixo.</div>
+  <div class="card-sub">Vamos configurar seu bot em poucos minutos. Primeiro, qual é o tipo do seu negócio?</div>
+
+  <form method="POST" action="/setup/step0?token={token}">
+    <input type="hidden" name="token" value="{token}">
+    <input type="hidden" name="business_type" id="biz_type_val" value="">
+
+    <div class="biz-grid">{biz_cards}</div>
+
+    <div id="biz-error" style="display:none;margin-top:12px" class="alert alert-error">
+      Por favor, selecione o tipo do seu negócio.
+    </div>
+
+    <button type="button" onclick="submitStep0()" class="btn btn-primary btn-full" style="margin-top:20px">
+      Próximo →
+    </button>
+  </form>
+</div>
+</div>
+
+<script>
+function selectBiz(key) {{
+  document.querySelectorAll('.biz-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('biz-' + key).classList.add('selected');
+  document.getElementById('biz_type_val').value = key;
+  document.getElementById('biz-error').style.display = 'none';
+}}
+function submitStep0() {{
+  const val = document.getElementById('biz_type_val').value;
+  if (!val) {{ document.getElementById('biz-error').style.display = 'block'; return; }}
+  document.querySelector('form').submit();
+}}
+</script>
+</body></html>""")
+
+
+@router.post("/setup/step0")
+async def setup_step0_post(request: Request, token: str = "", db: Session = Depends(get_db)):
+    form = await request.form()
+    token = token or form.get("token", "")
+    tenant = _get_tenant_by_token(token, db)
+    if not tenant:
+        return _error_page("Link inválido ou expirado.")
+
+    biz_type = form.get("business_type", "outro")
+    if biz_type not in BUSINESS_TYPES:
+        biz_type = "outro"
+
+    info = BUSINESS_TYPES[biz_type]
+
+    # Atualiza o tenant com o tipo escolhido e dados padrão do tipo
+    tenant.business_type        = biz_type
+    tenant.tenant_icon          = info["icon"]
+    tenant.subject_label        = info["subject"]
+    tenant.subject_label_plural = info["subject_plural"]
+
+    # Remove serviço placeholder e adiciona serviços padrão do tipo
+    db.query(Service).filter(Service.tenant_id == tenant.id).delete()
+    for nome, dur, preco, cor, desc in SERVICOS_PADRAO.get(biz_type, SERVICOS_PADRAO["outro"]):
+        db.add(Service(
+            tenant_id=tenant.id, name=nome, duration_min=dur,
+            price=preco, color=cor, description=desc, active=True
+        ))
+
+    db.commit()
+    return RedirectResponse(f"/setup/step1?token={token}", status_code=302)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PASSO 1 — Confirmar nome do negócio e atendente
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/setup/step1", response_class=HTMLResponse)
+def setup_step1(request: Request, token: str = "", db: Session = Depends(get_db)):
+    tenant = _get_tenant_by_token(token, db)
+    if not tenant:
+        return _error_page("Link inválido ou expirado.")
+
+    display  = tenant.display_name or tenant.name or ""
+    attendant = getattr(tenant, 'bot_attendant_name', 'Mari') or 'Mari'
+    biz_name  = getattr(tenant, 'bot_business_name', '') or display
+    biz_label = BUSINESS_TYPES.get(tenant.business_type or "outro", {}).get("label", "Negócio")
+
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Setup — Passo 2</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<div class="container">
+{_steps_html(2)}
+
+<div class="card">
+  <div class="card-title">🏢 Dados do negócio</div>
+  <div class="card-sub">Tipo selecionado: <strong style="color:#7c7de8">{biz_label}</strong> — confirme as informações abaixo.</div>
 
   <form method="POST" action="/setup/step1?token={token}">
     <input type="hidden" name="token" value="{token}">
@@ -183,13 +287,16 @@ def setup_step1(request: Request, token: str = "", db: Session = Depends(get_db)
       <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Ex: "Olá! Sou a Mari da <strong>Barbearia do João</strong>"</div>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-full">Próximo →</button>
+    <div style="display:flex;gap:10px">
+      <a href="/setup?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
+      <button type="submit" class="btn btn-primary" style="flex:2">Próximo →</button>
+    </div>
   </form>
 </div>
 </div></body></html>""")
 
 
-@router.post("/setup/step1", response_class=HTMLResponse)
+@router.post("/setup/step1")
 async def setup_step1_post(request: Request, token: str = "", db: Session = Depends(get_db)):
     form = await request.form()
     token = token or form.get("token", "")
@@ -214,30 +321,36 @@ def setup_step2(request: Request, token: str = "", db: Session = Depends(get_db)
     if not tenant:
         return _error_page("Link inválido ou expirado.")
 
-    open_days_list = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
-    days_btns = ''.join(
+    open_days_list    = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
+    days_btns         = ''.join(
         f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" data-day="{i}" onclick="toggleDay(this)">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
-    open_time  = getattr(tenant, 'open_time', '09:00') or '09:00'
-    close_time = getattr(tenant, 'close_time', '18:00') or '18:00'
-    needs_address = getattr(tenant, 'needs_address', False)
-    current_label = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
-    na_checked = 'checked' if needs_address else ''
-    addr_display = 'block' if needs_address else 'none'
+    open_time         = getattr(tenant, 'open_time', '09:00') or '09:00'
+    close_time        = getattr(tenant, 'close_time', '18:00') or '18:00'
+    needs_address     = getattr(tenant, 'needs_address', False)
+    current_label     = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
+    na_checked        = 'checked' if needs_address else ''
+    addr_display      = 'block' if needs_address else 'none'
+    addr_opts         = ''.join(f'<option value="{l}" {"selected" if l == current_label else ""}>{l}</option>' for l in ADDRESS_LABELS)
 
-    addr_opts = ''.join(f'<option value="{l}" {"selected" if l == current_label else ""}>{l}</option>' for l in ADDRESS_LABELS)
+    # Sugere toggle de endereço para petshop
+    biz_type          = tenant.business_type or "outro"
+    addr_suggest      = BUSINESS_TYPES.get(biz_type, {}).get("needs_address_suggest", False)
+    suggest_html      = ""
+    if addr_suggest and not needs_address:
+        suggest_html = '<div class="alert alert-info" style="margin-bottom:12px">💡 Pet shops geralmente oferecem serviço de busca e entrega. Ative abaixo se for o seu caso!</div>'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 2</title>{SETUP_STYLE}</head><body>
+<title>Setup — Passo 3</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
 <div class="container">
-{_steps_html(2)}
+{_steps_html(3)}
 
 <div class="card">
   <div class="card-title">⏰ Horário de funcionamento</div>
-  <div class="card-sub">Configure os dias e horários em que seu negócio atende. O bot não vai aceitar agendamentos fora desses períodos.</div>
+  <div class="card-sub">Configure os dias e horários em que seu negócio atende.</div>
 
   <form method="POST" action="/setup/step2?token={token}">
     <input type="hidden" name="token" value="{token}">
@@ -261,6 +374,7 @@ def setup_step2(request: Request, token: str = "", db: Session = Depends(get_db)
 
     <div class="divider"></div>
     <div style="font-size:13px;font-weight:700;margin-bottom:12px">📍 Coleta de endereço</div>
+    {suggest_html}
 
     <div class="form-group">
       <label class="toggle-switch">
@@ -279,7 +393,7 @@ def setup_step2(request: Request, token: str = "", db: Session = Depends(get_db)
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <a href="/setup?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
+      <a href="/setup/step1?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
       <button type="submit" class="btn btn-primary" style="flex:2">Próximo →</button>
     </div>
   </form>
@@ -298,7 +412,7 @@ function toggleAddr(checked) {{
 </body></html>""")
 
 
-@router.post("/setup/step2", response_class=HTMLResponse)
+@router.post("/setup/step2")
 async def setup_step2_post(request: Request, token: str = "", db: Session = Depends(get_db)):
     form = await request.form()
     token = token or form.get("token", "")
@@ -306,11 +420,11 @@ async def setup_step2_post(request: Request, token: str = "", db: Session = Depe
     if not tenant:
         return _error_page("Link inválido ou expirado.")
 
-    tenant.open_days      = form.get("open_days", "0,1,2,3,4,5")
-    tenant.open_time      = form.get("open_time", "09:00")
-    tenant.close_time     = form.get("close_time", "18:00")
-    tenant.needs_address  = form.get("needs_address") == "1"
-    tenant.address_label  = form.get("address_label", "Endereço de busca")
+    tenant.open_days     = form.get("open_days", "0,1,2,3,4,5")
+    tenant.open_time     = form.get("open_time", "09:00")
+    tenant.close_time    = form.get("close_time", "18:00")
+    tenant.needs_address = form.get("needs_address") == "1"
+    tenant.address_label = form.get("address_label", "Endereço de busca")
     db.commit()
     return RedirectResponse(f"/setup/step3?token={token}", status_code=302)
 
@@ -326,6 +440,15 @@ def setup_step3(request: Request, token: str = "", db: Session = Depends(get_db)
         return _error_page("Link inválido ou expirado.")
 
     services = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).all()
+
+    # Limite de serviços por plano
+    plano = getattr(tenant, 'plan', 'basico') or 'basico'
+    limite = 7 if plano == 'basico' else 999
+    qtd_atual = len(services)
+    limite_html = ""
+    if plano == 'basico':
+        cor = "#fc8181" if qtd_atual >= limite else "#9aa0b8"
+        limite_html = f'<div style="font-size:12px;color:{cor};margin-bottom:12px">Plano Básico: {qtd_atual}/{limite} serviços. {"⚠️ Limite atingido — faça upgrade para adicionar mais." if qtd_atual >= limite else ""}</div>'
 
     svc_rows = ""
     for s in services:
@@ -347,49 +470,53 @@ def setup_step3(request: Request, token: str = "", db: Session = Depends(get_db)
 
     saved = request.query_params.get("saved") == "1"
     alert = '<div class="alert alert-success">✅ Serviço adicionado!</div>' if saved else ""
+    limit_reached = qtd_atual >= limite
+    add_form_display = 'none' if limit_reached else 'block'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 3</title>{SETUP_STYLE}</head><body>
+<title>Setup — Passo 4</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
 <div class="container">
-{_steps_html(3)}
+{_steps_html(4)}
 
 <div class="card">
   <div class="card-title">✂️ Serviços oferecidos</div>
   <div class="card-sub">Cadastre os serviços que seu negócio oferece. O bot vai usar essas informações para apresentar opções aos clientes.</div>
 
   {alert}
+  {limite_html}
 
   <div id="svc-list">{svc_rows}</div>
 
-  <div class="divider"></div>
-  <div style="font-size:13px;font-weight:700;margin-bottom:14px">Adicionar serviço</div>
-
-  <form method="POST" action="/setup/step3/add?token={token}">
-    <input type="hidden" name="token" value="{token}">
-    <div class="grid2">
-      <div class="form-group">
-        <label>Nome do serviço *</label>
-        <input name="name" placeholder="Ex: Corte + Barba" required>
+  <div id="add-form" style="display:{add_form_display}">
+    <div class="divider"></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:14px">Adicionar serviço</div>
+    <form method="POST" action="/setup/step3/add?token={token}">
+      <input type="hidden" name="token" value="{token}">
+      <div class="grid2">
+        <div class="form-group">
+          <label>Nome do serviço *</label>
+          <input name="name" placeholder="Ex: Corte + Barba" required>
+        </div>
+        <div class="form-group">
+          <label>Duração (minutos)</label>
+          <input name="duration_min" type="number" value="60" min="5" max="480">
+        </div>
       </div>
-      <div class="form-group">
-        <label>Duração (minutos)</label>
-        <input name="duration_min" type="number" value="60" min="5" max="480">
+      <div class="grid2">
+        <div class="form-group">
+          <label>Preço (R$)</label>
+          <input name="price" type="number" step="0.01" placeholder="50.00">
+        </div>
+        <div class="form-group">
+          <label>Descrição (opcional)</label>
+          <input name="description" placeholder="Ex: Inclui lavagem e finalização">
+        </div>
       </div>
-    </div>
-    <div class="grid2">
-      <div class="form-group">
-        <label>Preço (R$)</label>
-        <input name="price" type="number" step="0.01" placeholder="50.00">
-      </div>
-      <div class="form-group">
-        <label>Descrição (opcional)</label>
-        <input name="description" placeholder="Ex: Inclui lavagem e finalização">
-      </div>
-    </div>
-    <button type="submit" class="btn btn-success btn-sm">+ Adicionar serviço</button>
-  </form>
+      <button type="submit" class="btn btn-success btn-sm">+ Adicionar serviço</button>
+    </form>
+  </div>
 </div>
 
 <div style="display:flex;gap:10px">
@@ -407,6 +534,13 @@ async def setup_step3_add(request: Request, token: str = "", db: Session = Depen
     if not tenant:
         return _error_page("Link inválido ou expirado.")
 
+    # Verifica limite de plano
+    plano = getattr(tenant, 'plan', 'basico') or 'basico'
+    if plano == 'basico':
+        count = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).count()
+        if count >= 7:
+            return RedirectResponse(f"/setup/step3?token={token}", status_code=302)
+
     name = form.get("name", "").strip()
     if name:
         try: price_cents = int(float(form.get("price", "0") or "0") * 100)
@@ -414,19 +548,14 @@ async def setup_step3_add(request: Request, token: str = "", db: Session = Depen
         try: duration = int(form.get("duration_min", "60") or "60")
         except: duration = 60
 
-        # Cor por index dos serviços existentes
         COLORS = ["#6C5CE7","#74b9ff","#00b894","#fd79a8","#f0a500","#a29bfe","#55efc4","#e17055"]
         count = db.query(Service).filter(Service.tenant_id == tenant.id).count()
         color = COLORS[count % len(COLORS)]
 
         db.add(Service(
-            tenant_id=tenant.id,
-            name=name,
-            duration_min=duration,
-            price=price_cents,
-            description=form.get("description", "").strip() or None,
-            color=color,
-            active=True,
+            tenant_id=tenant.id, name=name, duration_min=duration,
+            price=price_cents, description=form.get("description", "").strip() or None,
+            color=color, active=True,
         ))
         db.commit()
 
@@ -439,7 +568,6 @@ def setup_step3_delete(service_id: str, request: Request, token: str = "", db: S
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
         return _error_page("Link inválido ou expirado.")
-
     svc = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant.id).first()
     if svc:
         db.delete(svc)
@@ -458,21 +586,20 @@ def setup_step4(request: Request, token: str = "", db: Session = Depends(get_db)
         return _error_page("Link inválido ou expirado.")
 
     current_instance = tenant.phone_number_id or ""
-    evo_url = EVOLUTION_API_URL.rstrip("/") if EVOLUTION_API_URL else ""
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 4</title>{SETUP_STYLE}</head><body>
+<title>Setup — Passo 5</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
 <div class="container">
-{_steps_html(4)}
+{_steps_html(5)}
 
 <div class="card">
   <div class="card-title">📱 Conectar WhatsApp</div>
-  <div class="card-sub">Informe o nome da instância da Evolution API que você criou para este negócio. O bot usará esse número para conversar com seus clientes.</div>
+  <div class="card-sub">Informe o nome da instância da Evolution API que você criou para este negócio.</div>
 
   <div class="alert alert-info" style="margin-bottom:20px">
-    💡 <strong>Não sabe o que é isso?</strong> Você precisa ter a Evolution API instalada e uma instância criada. Peça ajuda ao suporte se não souber como fazer.
+    💡 <strong>Não sabe o que é isso?</strong> Você precisa ter a Evolution API instalada e uma instância criada. Peça ajuda ao suporte ou assista ao tutorial em vídeo.
   </div>
 
   <div class="form-group">
@@ -488,7 +615,6 @@ def setup_step4(request: Request, token: str = "", db: Session = Depends(get_db)
   </div>
 
   <div class="divider"></div>
-
   <div style="font-size:13px;font-weight:700;margin-bottom:14px">📋 Passos para conectar</div>
   <div style="font-size:13px;color:#9aa0b8;line-height:1.8">
     <div style="padding:8px 0;border-bottom:1px solid #2d3148">1. Acesse o painel da Evolution API no seu servidor</div>
@@ -499,7 +625,6 @@ def setup_step4(request: Request, token: str = "", db: Session = Depends(get_db)
   </div>
 
   <div class="divider"></div>
-
   <div style="display:flex;gap:10px;margin-top:8px">
     <a href="/setup/step3?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
     <button onclick="saveAndNext()" class="btn btn-primary" style="flex:2">Salvar e continuar →</button>
@@ -512,8 +637,7 @@ const TOKEN = "{token}";
 let lastStatus = null;
 
 function resetStatus() {{
-  const el = document.getElementById('conn-status');
-  el.style.display = 'none';
+  document.getElementById('conn-status').style.display = 'none';
   lastStatus = null;
 }}
 
@@ -524,7 +648,6 @@ async function testConnection() {{
   el.style.display = 'block';
   el.className = 'conn-status conn-loading';
   el.textContent = '⏳ Verificando conexão...';
-
   try {{
     const res = await fetch(`/setup/test-whatsapp?token=${{TOKEN}}&instance=${{encodeURIComponent(instance)}}`);
     const data = await res.json();
@@ -566,14 +689,11 @@ async function saveAndNext() {{
 
 @router.get("/setup/test-whatsapp")
 async def test_whatsapp(token: str = "", instance: str = "", db: Session = Depends(get_db)):
-    """Testa se a instância Evolution API está conectada."""
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
         return JSONResponse({"status": "error", "message": "Token inválido"}, status_code=400)
-
     if not instance:
         return JSONResponse({"status": "error", "message": "Instância não informada"}, status_code=400)
-
     if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
         return JSONResponse({"status": "error", "message": "Evolution API não configurada no servidor"}, status_code=500)
 
@@ -604,7 +724,7 @@ async def setup_step4_save(request: Request, token: str = "", db: Session = Depe
     if not instance:
         return JSONResponse({"ok": True})
 
-    # Verifica se já está em uso por outro tenant
+    # Verifica se a instância já está em uso por outro tenant
     existing = db.query(Tenant).filter(
         Tenant.phone_number_id == instance,
         Tenant.id != tenant.id
@@ -635,9 +755,9 @@ def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)
     if not tenant:
         return _error_page("Link inválido ou expirado.")
 
-    services = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).count()
-    has_wa = bool(tenant.phone_number_id)
-    has_services = services > 0
+    services  = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).count()
+    has_wa    = bool(tenant.phone_number_id)
+    has_svc   = services > 0
 
     checks = [
         ("✅" if (tenant.display_name or tenant.name) else "⚠️",
@@ -647,10 +767,10 @@ def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)
          "Horários configurados",
          f"{getattr(tenant,'open_time','09:00')} às {getattr(tenant,'close_time','18:00')}",
          bool(getattr(tenant, 'open_days', None))),
-        ("✅" if has_services else "⚠️",
+        ("✅" if has_svc else "⚠️",
          "Serviços cadastrados",
-         f"{services} serviço(s)" if has_services else "Nenhum serviço cadastrado",
-         has_services),
+         f"{services} serviço(s)" if has_svc else "Nenhum serviço cadastrado",
+         has_svc),
         ("✅" if has_wa else "⚠️",
          "WhatsApp conectado",
          tenant.phone_number_id if has_wa else "Instância não configurada",
@@ -669,15 +789,15 @@ def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)
           </div>
         </div>"""
 
-    error = request.query_params.get("error", "")
+    error    = request.query_params.get("error", "")
     err_html = f'<div class="alert alert-error">{error}</div>' if error else ""
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 5</title>{SETUP_STYLE}</head><body>
+<title>Setup — Passo 6</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
 <div class="container">
-{_steps_html(5)}
+{_steps_html(6)}
 
 <div class="card">
   <div class="card-title">📋 Resumo da configuração</div>
@@ -716,17 +836,17 @@ def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)
 
 <script>
 function checkPw() {{
-  const pw = document.getElementById('pw').value;
+  const pw  = document.getElementById('pw').value;
   const bar = document.getElementById('pw-bar');
   let strength = 0;
-  if (pw.length >= 6) strength++;
+  if (pw.length >= 6)  strength++;
   if (pw.length >= 10) strength++;
   if (/[A-Z]/.test(pw)) strength++;
   if (/[0-9]/.test(pw)) strength++;
   const colors = ['#fc8181','#f6c90e','#68d391','#00b894'];
-  const widths = ['25%','50%','75%','100%'];
+  const widths  = ['25%','50%','75%','100%'];
   bar.style.background = colors[strength-1] || '#2d3148';
-  bar.style.width = widths[strength-1] || '0%';
+  bar.style.width      = widths[strength-1]  || '0%';
 }}
 </script>
 </body></html>""")
@@ -734,7 +854,7 @@ function checkPw() {{
 
 @router.post("/setup/complete")
 async def setup_complete(request: Request, token: str = "", db: Session = Depends(get_db)):
-    form = await request.form()
+    form  = await request.form()
     token = token or form.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
@@ -754,7 +874,7 @@ async def setup_complete(request: Request, token: str = "", db: Session = Depend
         tenant.dashboard_token = secrets.token_urlsafe(32)
     tenant.bot_active  = True
     tenant.setup_done  = True
-    tenant.setup_token = None   # invalida o link — não pode ser reutilizado
+    tenant.setup_token = None
     db.commit()
 
     return RedirectResponse(f"/setup/done?tid={tenant.id}", status_code=302)
@@ -770,9 +890,9 @@ def setup_done(request: Request, tid: str = "", db: Session = Depends(get_db)):
     if not tenant:
         return _error_page("Página não encontrada.")
 
-    base_url = request.headers.get("x-forwarded-proto", "https") + "://" + request.headers.get("host", "")
+    base_url      = request.headers.get("x-forwarded-proto", "https") + "://" + request.headers.get("host", "")
     dashboard_url = f"{base_url}/dashboard?tid={tenant.id}"
-    display = tenant.display_name or tenant.name
+    display       = tenant.display_name or tenant.name
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

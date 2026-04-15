@@ -14,24 +14,23 @@ from datetime import datetime, timedelta
 import pytz
 
 router = APIRouter()
-BRASILIA = pytz.timezone("America/Sao_Paulo")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-COMANDOS_RESET = ["/start", "/reiniciar", "/reset", "/novo"]
-
+BRASILIA          = pytz.timezone("America/Sao_Paulo")
+TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_API      = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+COMANDOS_RESET    = ["/start", "/reiniciar", "/reset", "/novo"]
 TELEGRAM_TENANT_ID = os.getenv("TELEGRAM_TENANT_ID", "")
 
 
 def get_tenant_services(db, tenant_id: str) -> list:
     services = db.query(Service).filter(
         Service.tenant_id == tenant_id,
-        Service.active == True
+        Service.active    == True
     ).all()
     result = []
     for s in services:
         key = s.name.lower()
-        key = key.replace(" ", "_").replace("ã", "a").replace("é", "e").replace("ê", "e")
-        key = key.replace("ç", "c").replace("á", "a").replace("ó", "o").replace("í", "i")
+        key = key.replace(" ", "_").replace("ã","a").replace("é","e").replace("ê","e")
+        key = key.replace("ç","c").replace("á","a").replace("ó","o").replace("í","i")
         key = "".join(c for c in key if c.isalnum() or c == "_")
         result.append({
             "id": s.id, "key": key, "name": s.name,
@@ -53,7 +52,6 @@ def get_tenant_config(tenant) -> dict:
         "open_days":            getattr(tenant, 'open_days', None) or "0,1,2,3,4,5",
         "open_time":            getattr(tenant, 'open_time', None) or "09:00",
         "close_time":           getattr(tenant, 'close_time', None) or "18:00",
-        # ── Etapa 5: endereço ──────────────────────────────────────────────
         "needs_address":        bool(getattr(tenant, 'needs_address', False)),
         "address_label":        getattr(tenant, 'address_label', None) or "Endereço de busca",
     }
@@ -70,16 +68,16 @@ def find_service_by_key(services: list, key: str):
 
 
 def get_customer_context(db, tenant_id, customer_id, customer_name) -> dict:
-    pets = db.query(Pet).filter(Pet.tenant_id == tenant_id, Pet.customer_id == customer_id).all()
+    pets  = db.query(Pet).filter(Pet.tenant_id == tenant_id, Pet.customer_id == customer_id).all()
     total = db.query(Appointment).filter(
-        Appointment.tenant_id == tenant_id,
+        Appointment.tenant_id   == tenant_id,
         Appointment.customer_id == customer_id,
-        Appointment.status != "cancelled"
+        Appointment.status      != "cancelled"
     ).count()
     return {
         "name": customer_name or "",
         "pets": [{"name": p.name, "breed": p.breed, "weight": p.weight} for p in pets],
-        "total_appointments": total
+        "total_appointments": total,
     }
 
 
@@ -92,8 +90,8 @@ def should_reset_conversation(conversation) -> bool:
 
 def check_business_hours_dynamic(tenant_config: dict, date_str: str) -> dict:
     try:
-        date = datetime.strptime(date_str, "%Y-%m-%d")
-        weekday = str(date.weekday())
+        date      = datetime.strptime(date_str, "%Y-%m-%d")
+        weekday   = str(date.weekday())
         open_days = [d.strip() for d in (tenant_config.get("open_days") or "0,1,2,3,4,5").split(",")]
         if weekday not in open_days:
             return {"open": False, "reason": "closed_day"}
@@ -102,14 +100,14 @@ def check_business_hours_dynamic(tenant_config: dict, date_str: str) -> dict:
         if date.date() < datetime.now().date():
             return {"open": False, "reason": "past"}
         return {"open": True}
-    except:
+    except Exception:
         return {"open": False, "reason": "invalid_date"}
 
 
 def _find_tenant_for_telegram(db) -> Tenant:
     if TELEGRAM_TENANT_ID:
         tenant = db.query(Tenant).filter(
-            Tenant.id == TELEGRAM_TENANT_ID,
+            Tenant.id         == TELEGRAM_TENANT_ID,
             Tenant.bot_active == True
         ).first()
         if tenant:
@@ -121,8 +119,8 @@ def _find_tenant_for_telegram(db) -> Tenant:
         return tenants_ativos[0]
     elif len(tenants_ativos) > 1:
         print(
-            f"[Telegram] AVISO DE PRIVACIDADE: Há {len(tenants_ativos)} tenants ativos e TELEGRAM_TENANT_ID "
-            f"não está configurado! Configure TELEGRAM_TENANT_ID no .env para evitar vazamento de dados entre tenants."
+            f"[Telegram] AVISO: {len(tenants_ativos)} tenants ativos e TELEGRAM_TENANT_ID não configurado! "
+            f"Configure TELEGRAM_TENANT_ID no .env para evitar vazamento de dados entre tenants."
         )
         return tenants_ativos[0]
     return None
@@ -134,8 +132,10 @@ async def send_telegram_message(chat_id: int, text: str):
         return
     async with httpx.AsyncClient() as client:
         try:
-            await client.post(f"{TELEGRAM_API}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+            await client.post(
+                f"{TELEGRAM_API}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+            )
         except Exception as e:
             print(f"[Telegram] Erro ao enviar mensagem: {e}")
 
@@ -149,10 +149,10 @@ async def telegram_webhook(request: Request):
     if "text" not in message:
         return {"status": "ignored"}
 
-    chat_id = message["chat"]["id"]
+    chat_id        = message["chat"]["id"]
     customer_phone = str(chat_id)
-    message_text = message["text"].strip()
-    first_name = message["chat"].get("first_name", "")
+    message_text   = message["text"].strip()
+    first_name     = message["chat"].get("first_name", "")
 
     db = SessionLocal()
     try:
@@ -162,19 +162,26 @@ async def telegram_webhook(request: Request):
             return {"status": "tenant_not_found"}
 
         if not getattr(tenant, 'bot_active', True):
-            await send_telegram_message(chat_id, "Olá! Estamos temporariamente fora do ar. Por favor, tente mais tarde. 🙏")
+            await send_telegram_message(
+                chat_id,
+                "Olá! Estamos temporariamente fora do ar. Por favor, tente mais tarde. 🙏"
+            )
             return {"status": "bot_inactive"}
 
         tenant_config = get_tenant_config(tenant)
-        services = get_tenant_services(db, tenant.id)
+        services      = get_tenant_services(db, tenant.id)
         business_name = tenant_config["bot_business_name"]
 
+        # Busca ou cria cliente
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
-            Customer.phone == customer_phone
+            Customer.phone     == customer_phone
         ).first()
         if not customer:
-            customer = Customer(tenant_id=tenant.id, phone=customer_phone, name=first_name, wa_id=customer_phone)
+            customer = Customer(
+                tenant_id=tenant.id, phone=customer_phone,
+                name=first_name, wa_id=customer_phone
+            )
             db.add(customer)
             db.commit()
             db.refresh(customer)
@@ -182,47 +189,60 @@ async def telegram_webhook(request: Request):
             customer.name = first_name
             db.commit()
 
+        # Busca ou cria conversa
         conversation = db.query(Conversation).filter(
-            Conversation.tenant_id == tenant.id,
+            Conversation.tenant_id      == tenant.id,
             Conversation.customer_phone == customer_phone
         ).first()
         if not conversation:
-            conversation = Conversation(tenant_id=tenant.id, customer_phone=customer_phone, messages="[]")
+            conversation = Conversation(
+                tenant_id=tenant.id, customer_phone=customer_phone, messages="[]"
+            )
             db.add(conversation)
             db.commit()
             db.refresh(conversation)
 
+        # Comandos de reset
         if message_text.lower() in COMANDOS_RESET:
             conversation.messages = "[]"
             db.commit()
             nome = f" {customer.name or first_name}" if (customer.name or first_name) else ""
-            await send_telegram_message(chat_id, f"Oi{nome}! 😊 Bem-vindo ao {business_name}!\n\nComo posso ajudar você hoje? 🐾")
+            await send_telegram_message(
+                chat_id,
+                f"Oi{nome}! 😊 Bem-vindo(a) ao {business_name}!\n\nComo posso ajudar você hoje?"
+            )
             return {"status": "ok"}
 
+        # Reset automático após 24h de inatividade
         if should_reset_conversation(conversation):
             conversation.messages = "[]"
             db.commit()
 
-        history = json.loads(conversation.messages)
-        customer_context = get_customer_context(db, tenant.id, customer.id, customer.name or first_name)
+        history          = json.loads(conversation.messages)
+        customer_context = get_customer_context(
+            db, tenant.id, customer.id, customer.name or first_name
+        )
 
+        # Chama IA
         ai_response = chat_with_ai(
             history, message_text, customer_context,
             tenant_config=tenant_config,
             services=services
         )
-        action = ai_response.get("action", "reply")
+        action     = ai_response.get("action", "reply")
         reply_text = ""
 
+        # ── check_availability ────────────────────────────────────────────
         if action == "check_availability":
             date_str = ai_response.get("date", "")
-            check = check_business_hours_dynamic(tenant_config, date_str)
+            check    = check_business_hours_dynamic(tenant_config, date_str)
+
             if not check["open"]:
-                reason = check.get("reason", "")
-                open_time  = tenant_config.get("open_time", "09:00")
-                close_time = tenant_config.get("close_time", "18:00")
+                reason  = check.get("reason", "")
+                open_t  = tenant_config.get("open_time", "09:00")
+                close_t = tenant_config.get("close_time", "18:00")
                 if reason == "closed_day":
-                    reply_text = f"😔 Nesse dia não funcionamos!\n\nFuncionamos {open_time} às {close_time}.\nPosso verificar outro dia? 😊"
+                    reply_text = f"😔 Nesse dia não funcionamos!\n\nFuncionamos {open_t} às {close_t}.\nPosso verificar outro dia? 😊"
                 elif reason == "holiday":
                     reply_text = f"🎉 Nesse dia é feriado!\n\nPosso verificar outro dia? 😊"
                 elif reason == "past":
@@ -230,22 +250,24 @@ async def telegram_webhook(request: Request):
                 else:
                     reply_text = "Não consigo agendar para essa data. Pode escolher outro dia?"
             else:
-                slots = get_available_slots(db, tenant.id, date_str, ai_response.get("service", ""))
+                slots          = get_available_slots(db, tenant.id, date_str, ai_response.get("service", ""))
                 requested_time = ai_response.get("requested_time", "")
                 if requested_time:
                     available_times = [s["time"] for s in slots]
                     if requested_time in available_times:
                         reply_text = f"__SLOT_OK__{requested_time}__{date_str}"
                     else:
-                        proximos = available_times[:3] if available_times else []
+                        proximos  = available_times[:3] if available_times else []
                         sugestoes = ", ".join(proximos) if proximos else "nenhum"
                         reply_text = f"__SLOT_OCUPADO__{requested_time}__{date_str}__{sugestoes}"
                 else:
                     reply_text = format_slots_for_ai(slots, date_str)
 
+        # ── create_appointment ────────────────────────────────────────────
         elif action == "create_appointment":
             service_key = ai_response.get("service", "")
-            svc_data = find_service_by_key(services, service_key)
+            svc_data    = find_service_by_key(services, service_key)
+
             if not svc_data:
                 reply_text = "Desculpe, não encontrei esse serviço. Pode escolher outro?"
             else:
@@ -253,6 +275,7 @@ async def telegram_webhook(request: Request):
                 if not service_obj:
                     reply_text = "Serviço não encontrado. Pode escolher outro?"
                 else:
+                    # Salva nome do cliente se ainda não temos
                     customer_name_ai = ai_response.get("customer_name", "")
                     nome_final = customer_name_ai or customer.name or first_name or ""
                     if nome_final and not customer.name:
@@ -261,7 +284,6 @@ async def telegram_webhook(request: Request):
                     if not ai_response.get("customer_name") and nome_final:
                         ai_response["customer_name"] = nome_final
 
-                    # ── Etapa 5: captura endereço da resposta da IA ────────
                     pickup_address = ai_response.get("pickup_address") or None
 
                     result = create_appointment(
@@ -274,41 +296,54 @@ async def telegram_webhook(request: Request):
                         pet_breed=ai_response.get("pet_breed"),
                         pet_weight=ai_response.get("pet_weight"),
                         pickup_time=ai_response.get("pickup_time"),
-                        pickup_address=pickup_address,   # ← NOVO
+                        pickup_address=pickup_address,
                     )
 
-                    price_fmt = f"R$ {svc_data['price']/100:.2f}" if svc_data.get('price') else ""
-                    subject   = tenant_config.get("subject_label", "Pet")
-
                     if result["success"]:
-                        pet_info = ai_response.get("pet_name", f"seu {subject.lower()}")
-                        if ai_response.get("pet_breed"):
-                            pet_info += f" ({ai_response['pet_breed']})"
-                        pickup = f"\n🏠 Busca: {ai_response['pickup_time']}" if ai_response.get("pickup_time") else ""
+                        # A IA gera a mensagem de confirmação adaptada ao tipo
+                        # de negócio. Usamos o campo "message" diretamente.
+                        ia_message = ai_response.get("message", "")
 
-                        # ── Linha de endereço condicional ──────────────────
-                        if pickup_address:
-                            label = tenant_config.get("address_label", "Endereço")
-                            address_line = f"\n📍 {label}: {pickup_address}"
+                        if ia_message:
+                            # Adiciona endereço se necessário (LGPD: só aqui)
+                            if pickup_address:
+                                label = tenant_config.get("address_label", "Endereço")
+                                if label.lower() not in ia_message.lower():
+                                    ia_message += f"\n📍 {label}: {pickup_address}"
+                            reply_text = ia_message
                         else:
-                            address_line = ""
+                            # Fallback manual
+                            subject   = tenant_config.get("subject_label", "Cliente")
+                            price_fmt = f"R$ {svc_data['price']/100:.2f}" if svc_data.get('price') else ""
+                            pet_info  = ai_response.get("pet_name", "")
+                            if pet_info and ai_response.get("pet_breed"):
+                                pet_info += f" ({ai_response['pet_breed']})"
+                            pet_ln    = f"\n🐾 {subject}: {pet_info}" if pet_info else ""
+                            pickup_ln = f"\n🏠 Busca: {ai_response['pickup_time']}" if ai_response.get("pickup_time") else ""
+                            addr_ln   = f"\n📍 {tenant_config.get('address_label','Endereço')}: {pickup_address}" if pickup_address else ""
+                            reply_text = (
+                                f"✅ Agendamento confirmado!\n\n"
+                                f"✂️ Serviço: {service_obj.name}{' — ' + price_fmt if price_fmt else ''}\n"
+                                f"📅 {result['scheduled_at']}"
+                                f"{pet_ln}{pickup_ln}{addr_ln}\n\n"
+                                f"Até lá! 😊"
+                            )
 
-                        reply_text = (
-                            f"✅ Agendamento confirmado!\n\n"
-                            f"🐾 {subject}: {pet_info}\n"
-                            f"✂️ Serviço: {service_obj.name}{' — ' + price_fmt if price_fmt else ''}\n"
-                            f"📅 Data: {result['scheduled_at']}"
-                            f"{pickup}"
-                            f"{address_line}\n\n"
-                            f"Até lá! 😊"
-                        )
-
-                        appt_obj = db.query(Appointment).filter(Appointment.id == result["appointment_id"]).first()
+                        # Notifica o dono
+                        appt_obj = db.query(Appointment).filter(
+                            Appointment.id == result["appointment_id"]
+                        ).first()
                         if appt_obj:
-                            await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
+                            await notify_owner_new_appointment(
+                                tenant, appt_obj, customer, service_obj
+                            )
+                        # LGPD: nunca loga endereço
+                        print(f"[Agendamento-Telegram] criado | endereço: {'sim' if pickup_address else 'não'}")
+
                     else:
                         reply_text = f"😕 Não consegui confirmar ({result['error']}). Vamos tentar outro horário?"
 
+        # ── list_appointments ─────────────────────────────────────────────
         elif action == "list_appointments":
             appointments = get_customer_appointments(db, tenant.id, customer.id)
             if not appointments:
@@ -322,44 +357,55 @@ async def telegram_webhook(request: Request):
                     reply_text += "\n"
                 reply_text += "\nPara cancelar, me diga o número."
 
+        # ── cancel_appointment ────────────────────────────────────────────
         elif action == "cancel_appointment":
-            idx = ai_response.get("appointment_index", 1) - 1
+            idx          = ai_response.get("appointment_index", 1) - 1
             appointments = get_customer_appointments(db, tenant.id, customer.id)
             if not appointments:
                 reply_text = "Você não tem agendamentos para cancelar."
             elif idx < 0 or idx >= len(appointments):
                 reply_text = "Não encontrei esse agendamento."
             else:
-                appt = appointments[idx]
+                appt   = appointments[idx]
                 result = cancel_appointment(db, appt["id"], tenant.id)
                 if result["success"]:
                     reply_text = f"✅ Agendamento de {appt['scheduled_at']} cancelado!"
                 else:
                     reply_text = f"Não consegui cancelar: {result['error']}"
 
+        # ── reply ─────────────────────────────────────────────────────────
         else:
             reply_text = ai_response.get("message", "Desculpe, não entendi. Pode repetir?")
 
-        # ── Segunda chamada à IA para slots específicos ────────────────────
+        # ── Segunda chamada à IA para slots específicos ───────────────────
         if reply_text.startswith("__SLOT_OK__"):
-            parts = reply_text.split("__")
-            slot_time, slot_date = parts[2], parts[3]
-            slot_msg = f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta DISPONIVEL. Confirme esse horario ao cliente e siga para o proximo passo do agendamento."
+            parts      = reply_text.split("__")
+            slot_time  = parts[2]
+            slot_date  = parts[3]
+            slot_msg   = (
+                f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta DISPONIVEL. "
+                f"Confirme esse horario ao cliente e siga para o proximo passo do agendamento."
+            )
             history.append({"role": "user", "content": message_text})
-            ai2 = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
-            reply_text = ai2.get("message", f"Perfeito! O horario das {slot_time} esta disponivel 😊")
+            ai2        = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
+            reply_text = ai2.get("message", f"Perfeito! O horário das {slot_time} está disponível 😊")
 
         elif reply_text.startswith("__SLOT_OCUPADO__"):
-            parts = reply_text.split("__")
-            slot_time = parts[2]
-            slot_date = parts[3]
-            sugestoes = parts[4] if len(parts) > 4 else "nenhum"
-            slot_msg = f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta OCUPADO. Horarios proximos disponiveis: {sugestoes}. Informe o cliente e oferta esses horarios."
+            parts      = reply_text.split("__")
+            slot_time  = parts[2]
+            slot_date  = parts[3]
+            sugestoes  = parts[4] if len(parts) > 4 else "nenhum"
+            slot_msg   = (
+                f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta OCUPADO. "
+                f"Horarios proximos disponiveis: {sugestoes}. "
+                f"Informe o cliente e oferta esses horarios."
+            )
             history.append({"role": "user", "content": message_text})
-            ai2 = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
-            reply_text = ai2.get("message", f"Ops! O horario das {slot_time} esta ocupado. Temos {sugestoes} disponiveis. Qual prefere?")
+            ai2        = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
+            reply_text = ai2.get("message", f"Ops! O horário das {slot_time} está ocupado. Temos {sugestoes} disponíveis. Qual prefere?")
 
-        history.append({"role": "user", "content": message_text})
+        # Atualiza histórico e envia
+        history.append({"role": "user",      "content": message_text})
         history.append({"role": "assistant", "content": reply_text})
         conversation.messages = json.dumps(history[-20:])
         db.commit()
