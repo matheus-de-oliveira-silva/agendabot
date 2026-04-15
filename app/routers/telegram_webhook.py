@@ -1,3 +1,12 @@
+"""
+telegram_webhook.py — Recebe mensagens Telegram.
+
+LGPD:
+  - Dados isolados por tenant
+  - Endereços nunca logados
+  - Histórico limitado a 20 mensagens, resetado após 24h
+"""
+
 from fastapi import APIRouter, Request
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
@@ -8,16 +17,17 @@ from ..services.scheduler import (
     check_business_hours, create_appointment,
     cancel_appointment, get_customer_appointments, FERIADOS
 )
-import os, json, httpx
 from ..services.notifier import notify_owner_new_appointment
+import os, json, httpx
 from datetime import datetime, timedelta
 import pytz
 
-router = APIRouter()
-BRASILIA          = pytz.timezone("America/Sao_Paulo")
-TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_API      = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-COMANDOS_RESET    = ["/start", "/reiniciar", "/reset", "/novo"]
+router   = APIRouter()
+BRASILIA = pytz.timezone("America/Sao_Paulo")
+
+TELEGRAM_TOKEN     = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_API       = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+COMANDOS_RESET     = ["/start", "/reiniciar", "/reset", "/novo"]
 TELEGRAM_TENANT_ID = os.getenv("TELEGRAM_TENANT_ID", "")
 
 
@@ -112,15 +122,15 @@ def _find_tenant_for_telegram(db) -> Tenant:
         ).first()
         if tenant:
             return tenant
-        print(f"[Telegram] AVISO: TELEGRAM_TENANT_ID='{TELEGRAM_TENANT_ID}' não encontrado ou bot inativo.")
+        print(f"[Telegram] AVISO: TELEGRAM_TENANT_ID não encontrado ou bot inativo.")
 
     tenants_ativos = db.query(Tenant).filter(Tenant.bot_active == True).all()
     if len(tenants_ativos) == 1:
         return tenants_ativos[0]
     elif len(tenants_ativos) > 1:
         print(
-            f"[Telegram] AVISO: {len(tenants_ativos)} tenants ativos e TELEGRAM_TENANT_ID não configurado! "
-            f"Configure TELEGRAM_TENANT_ID no .env para evitar vazamento de dados entre tenants."
+            f"[Telegram] ⚠️ LGPD: {len(tenants_ativos)} tenants ativos e TELEGRAM_TENANT_ID "
+            f"não configurado! Configure TELEGRAM_TENANT_ID para evitar vazamento de dados."
         )
         return tenants_ativos[0]
     return None
@@ -128,7 +138,6 @@ def _find_tenant_for_telegram(db) -> Tenant:
 
 async def send_telegram_message(chat_id: int, text: str):
     if not TELEGRAM_TOKEN:
-        print(f"[Telegram] TELEGRAM_TOKEN não configurado. Msg para {chat_id}: {text[:50]}...")
         return
     async with httpx.AsyncClient() as client:
         try:
@@ -137,7 +146,7 @@ async def send_telegram_message(chat_id: int, text: str):
                 json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
             )
         except Exception as e:
-            print(f"[Telegram] Erro ao enviar mensagem: {e}")
+            print(f"[Telegram] Erro ao enviar: {e}")
 
 
 @router.post("/telegram/webhook")
@@ -158,21 +167,17 @@ async def telegram_webhook(request: Request):
     try:
         tenant = _find_tenant_for_telegram(db)
         if not tenant:
-            await send_telegram_message(chat_id, "Serviço temporariamente indisponível. Tente mais tarde.")
+            await send_telegram_message(chat_id, "Serviço temporariamente indisponível.")
             return {"status": "tenant_not_found"}
 
         if not getattr(tenant, 'bot_active', True):
-            await send_telegram_message(
-                chat_id,
-                "Olá! Estamos temporariamente fora do ar. Por favor, tente mais tarde. 🙏"
-            )
+            await send_telegram_message(chat_id, "Estamos temporariamente fora do ar. Tente mais tarde. 🙏")
             return {"status": "bot_inactive"}
 
         tenant_config = get_tenant_config(tenant)
         services      = get_tenant_services(db, tenant.id)
         business_name = tenant_config["bot_business_name"]
 
-        # Busca ou cria cliente
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
             Customer.phone     == customer_phone
@@ -189,7 +194,6 @@ async def telegram_webhook(request: Request):
             customer.name = first_name
             db.commit()
 
-        # Busca ou cria conversa
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id      == tenant.id,
             Conversation.customer_phone == customer_phone
@@ -202,18 +206,13 @@ async def telegram_webhook(request: Request):
             db.commit()
             db.refresh(conversation)
 
-        # Comandos de reset
         if message_text.lower() in COMANDOS_RESET:
             conversation.messages = "[]"
             db.commit()
             nome = f" {customer.name or first_name}" if (customer.name or first_name) else ""
-            await send_telegram_message(
-                chat_id,
-                f"Oi{nome}! 😊 Bem-vindo(a) ao {business_name}!\n\nComo posso ajudar você hoje?"
-            )
+            await send_telegram_message(chat_id, f"Oi{nome}! 😊 Bem-vindo(a) ao {business_name}!\n\nComo posso ajudar?")
             return {"status": "ok"}
 
-        # Reset automático após 24h de inatividade
         if should_reset_conversation(conversation):
             conversation.messages = "[]"
             db.commit()
@@ -223,7 +222,6 @@ async def telegram_webhook(request: Request):
             db, tenant.id, customer.id, customer.name or first_name
         )
 
-        # Chama IA
         ai_response = chat_with_ai(
             history, message_text, customer_context,
             tenant_config=tenant_config,
@@ -232,11 +230,9 @@ async def telegram_webhook(request: Request):
         action     = ai_response.get("action", "reply")
         reply_text = ""
 
-        # ── check_availability ────────────────────────────────────────────
         if action == "check_availability":
             date_str = ai_response.get("date", "")
             check    = check_business_hours_dynamic(tenant_config, date_str)
-
             if not check["open"]:
                 reason  = check.get("reason", "")
                 open_t  = tenant_config.get("open_time", "09:00")
@@ -244,7 +240,7 @@ async def telegram_webhook(request: Request):
                 if reason == "closed_day":
                     reply_text = f"😔 Nesse dia não funcionamos!\n\nFuncionamos {open_t} às {close_t}.\nPosso verificar outro dia? 😊"
                 elif reason == "holiday":
-                    reply_text = f"🎉 Nesse dia é feriado!\n\nPosso verificar outro dia? 😊"
+                    reply_text = "🎉 Nesse dia é feriado! Posso verificar outro dia? 😊"
                 elif reason == "past":
                     reply_text = "Essa data já passou! Vamos escolher uma data futura? 😊"
                 else:
@@ -263,11 +259,9 @@ async def telegram_webhook(request: Request):
                 else:
                     reply_text = format_slots_for_ai(slots, date_str)
 
-        # ── create_appointment ────────────────────────────────────────────
         elif action == "create_appointment":
             service_key = ai_response.get("service", "")
             svc_data    = find_service_by_key(services, service_key)
-
             if not svc_data:
                 reply_text = "Desculpe, não encontrei esse serviço. Pode escolher outro?"
             else:
@@ -275,7 +269,6 @@ async def telegram_webhook(request: Request):
                 if not service_obj:
                     reply_text = "Serviço não encontrado. Pode escolher outro?"
                 else:
-                    # Salva nome do cliente se ainda não temos
                     customer_name_ai = ai_response.get("customer_name", "")
                     nome_final = customer_name_ai or customer.name or first_name or ""
                     if nome_final and not customer.name:
@@ -300,19 +293,14 @@ async def telegram_webhook(request: Request):
                     )
 
                     if result["success"]:
-                        # A IA gera a mensagem de confirmação adaptada ao tipo
-                        # de negócio. Usamos o campo "message" diretamente.
                         ia_message = ai_response.get("message", "")
-
                         if ia_message:
-                            # Adiciona endereço se necessário (LGPD: só aqui)
                             if pickup_address:
                                 label = tenant_config.get("address_label", "Endereço")
                                 if label.lower() not in ia_message.lower():
                                     ia_message += f"\n📍 {label}: {pickup_address}"
                             reply_text = ia_message
                         else:
-                            # Fallback manual
                             subject   = tenant_config.get("subject_label", "Cliente")
                             price_fmt = f"R$ {svc_data['price']/100:.2f}" if svc_data.get('price') else ""
                             pet_info  = ai_response.get("pet_name", "")
@@ -329,21 +317,16 @@ async def telegram_webhook(request: Request):
                                 f"Até lá! 😊"
                             )
 
-                        # Notifica o dono
                         appt_obj = db.query(Appointment).filter(
                             Appointment.id == result["appointment_id"]
                         ).first()
                         if appt_obj:
-                            await notify_owner_new_appointment(
-                                tenant, appt_obj, customer, service_obj
-                            )
-                        # LGPD: nunca loga endereço
-                        print(f"[Agendamento-Telegram] criado | endereço: {'sim' if pickup_address else 'não'}")
+                            await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
 
+                        print(f"[Agendamento-Telegram] criado | endereço: {'sim' if pickup_address else 'não'}")
                     else:
                         reply_text = f"😕 Não consegui confirmar ({result['error']}). Vamos tentar outro horário?"
 
-        # ── list_appointments ─────────────────────────────────────────────
         elif action == "list_appointments":
             appointments = get_customer_appointments(db, tenant.id, customer.id)
             if not appointments:
@@ -357,7 +340,6 @@ async def telegram_webhook(request: Request):
                     reply_text += "\n"
                 reply_text += "\nPara cancelar, me diga o número."
 
-        # ── cancel_appointment ────────────────────────────────────────────
         elif action == "cancel_appointment":
             idx          = ai_response.get("appointment_index", 1) - 1
             appointments = get_customer_appointments(db, tenant.id, customer.id)
@@ -373,18 +355,16 @@ async def telegram_webhook(request: Request):
                 else:
                     reply_text = f"Não consegui cancelar: {result['error']}"
 
-        # ── reply ─────────────────────────────────────────────────────────
         else:
             reply_text = ai_response.get("message", "Desculpe, não entendi. Pode repetir?")
 
-        # ── Segunda chamada à IA para slots específicos ───────────────────
         if reply_text.startswith("__SLOT_OK__"):
             parts      = reply_text.split("__")
             slot_time  = parts[2]
             slot_date  = parts[3]
             slot_msg   = (
                 f"[SISTEMA] O horario {slot_time} do dia {slot_date} esta DISPONIVEL. "
-                f"Confirme esse horario ao cliente e siga para o proximo passo do agendamento."
+                f"Confirme esse horario ao cliente e siga para o proximo passo."
             )
             history.append({"role": "user", "content": message_text})
             ai2        = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
@@ -404,7 +384,6 @@ async def telegram_webhook(request: Request):
             ai2        = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
             reply_text = ai2.get("message", f"Ops! O horário das {slot_time} está ocupado. Temos {sugestoes} disponíveis. Qual prefere?")
 
-        # Atualiza histórico e envia
         history.append({"role": "user",      "content": message_text})
         history.append({"role": "assistant", "content": reply_text})
         conversation.messages = json.dumps(history[-20:])

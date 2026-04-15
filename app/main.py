@@ -18,7 +18,8 @@ def _require_admin(request: Request):
     if token != ADMIN_SECRET:
         raise HTTPException(status_code=401, detail="Não autorizado")
 
-# ── Migração v1+v2 ────────────────────────────────────────────────────────────
+
+# ── Migration v1+v2 ───────────────────────────────────────────────────────────
 def _auto_migrate():
     novas_colunas = {
         "tenants": [
@@ -50,7 +51,6 @@ def _auto_migrate():
                     if col not in existentes:
                         try:
                             conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
-                            print(f"[migrate] ok {tabela}.{col}")
                         except Exception as e:
                             print(f"[migrate] skip {tabela}.{col}: {e}")
             conn.commit()
@@ -60,7 +60,8 @@ def _auto_migrate():
 
 _auto_migrate()
 
-# ── Migração v3 ───────────────────────────────────────────────────────────────
+
+# ── Migration v3 ──────────────────────────────────────────────────────────────
 def _auto_migrate_v3():
     try:
         inspector = sa_inspect(engine)
@@ -95,17 +96,18 @@ def _auto_migrate_v3():
 
 _auto_migrate_v3()
 
-# ── Migração v4 ───────────────────────────────────────────────────────────────
+
+# ── Migration v4 ──────────────────────────────────────────────────────────────
 def _auto_migrate_v4():
     novas_colunas = {
         "tenants": [
-            ("needs_address",  "BOOLEAN DEFAULT FALSE"),
-            ("address_label",  "VARCHAR DEFAULT 'Endereço de busca'"),
-            ("setup_token",    "VARCHAR"),
-            ("setup_done",     "BOOLEAN DEFAULT FALSE"),
-            ("plan",           "VARCHAR DEFAULT 'basico'"),
-            ("plan_active",    "BOOLEAN DEFAULT TRUE"),
-            ("billing_email",  "VARCHAR"),
+            ("needs_address", "BOOLEAN DEFAULT FALSE"),
+            ("address_label", "VARCHAR DEFAULT 'Endereço de busca'"),
+            ("setup_token",   "VARCHAR"),
+            ("setup_done",    "BOOLEAN DEFAULT FALSE"),
+            ("plan",          "VARCHAR DEFAULT 'basico'"),
+            ("plan_active",   "BOOLEAN DEFAULT TRUE"),
+            ("billing_email", "VARCHAR"),
         ],
         "appointments": [
             ("pickup_address", "VARCHAR"),
@@ -133,7 +135,8 @@ def _auto_migrate_v4():
 
 _auto_migrate_v4()
 
-# ── Migração v5: grupo de tenants para plano Agência ─────────────────────────
+
+# ── Migration v5 ──────────────────────────────────────────────────────────────
 def _auto_migrate_v5():
     novas_colunas = {
         "tenants": [
@@ -161,6 +164,43 @@ def _auto_migrate_v5():
         print(f"[migrate-v5] erro: {e}")
 
 _auto_migrate_v5()
+
+
+# ── Migration v6: Evolution por tenant (escalabilidade multi-servidor) ────────
+def _auto_migrate_v6():
+    """
+    Adiciona evolution_url e evolution_key por tenant.
+    Permite que cada cliente use um servidor Evolution diferente,
+    possibilitando escalar horizontalmente sem limites.
+    Se vazios, o sistema usa as variáveis globais EVOLUTION_API_URL/KEY do .env.
+    """
+    novas_colunas = {
+        "tenants": [
+            ("evolution_url", "VARCHAR"),  # URL da Evolution deste tenant (opcional)
+            ("evolution_key", "VARCHAR"),  # API key da Evolution deste tenant (opcional)
+        ],
+    }
+    try:
+        inspector = sa_inspect(engine)
+        with engine.connect() as conn:
+            for tabela, cols in novas_colunas.items():
+                try:
+                    existentes = {c["name"] for c in inspector.get_columns(tabela)}
+                except Exception:
+                    existentes = set()
+                for col, tipo in cols:
+                    if col not in existentes:
+                        try:
+                            conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
+                            print(f"[migrate-v6] ok {tabela}.{col}")
+                        except Exception as e:
+                            print(f"[migrate-v6] skip {tabela}.{col}: {e}")
+            conn.commit()
+        print("[migrate-v6] concluida.")
+    except Exception as e:
+        print(f"[migrate-v6] erro: {e}")
+
+_auto_migrate_v6()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -168,7 +208,7 @@ async def reminder_loop():
     from .services.reminder import send_daily_reminders
     from datetime import datetime
     while True:
-        agora = datetime.now()
+        agora  = datetime.now()
         target = agora.replace(hour=18, minute=0, second=0, microsecond=0)
         if agora >= target:
             target = target.replace(day=target.day + 1)
@@ -211,6 +251,7 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
 
 # ── Rotas utilitárias protegidas ──────────────────────────────────────────────
 

@@ -1,15 +1,26 @@
 """
 billing.py — Webhook da Kiwify para controle automático de assinatura.
 
-Como a Kiwify verifica autenticidade:
-  A Kiwify gera uma assinatura HMAC-SHA1 do body usando o token como chave secreta.
-  Essa assinatura chega como query param ?signature=xxx
-  Para verificar: hmac.new(token, body_bytes, sha1) == signature
+Fluxo completo:
+  compra_aprovada → cria tenant → envia WhatsApp de boas-vindas (onboarding manual)
+  subscription_renewed → reativa tenant
+  compra_reembolsada / chargeback / cancelado / atrasado → suspende
+
+Modelo de onboarding:
+  O cliente compra → recebe WhatsApp avisando que entraremos em contato
+  Você (Matheus) entra em contato, faz uma chamada de 15 min via compartilhamento de tela,
+  cria a instância na Evolution, escaneia o QR Code junto com o cliente
+  → bot ativo, cliente feliz, você no controle
 
 Planos:
   basico  R$97,90  — até 7 serviços, sem CSV, sem lembretes automáticos
   pro     R$197,90 — serviços ilimitados, CSV, lembretes automáticos
   agencia R$497,90 — tudo do pro + até 3 tenants vinculados ao mesmo email
+
+LGPD:
+  - Dados do comprador usados apenas para criar o tenant e enviar boas-vindas
+  - Email e telefone nunca logados em texto plano
+  - Tenant criado com bot_active=False até onboarding completo
 """
 
 from fastapi import APIRouter, Request
@@ -17,13 +28,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
 from ..models import Tenant, Service
-import os, secrets, bcrypt, httpx, hmac, hashlib
+from ..services.evolution_helper import send_whatsapp_via_instance
+import os, secrets, bcrypt, hmac, hashlib, json
 
 router = APIRouter()
 
 KIWIFY_WEBHOOK_TOKEN = os.getenv("KIWIFY_WEBHOOK_TOKEN", "")
-EVOLUTION_API_URL    = os.getenv("EVOLUTION_API_URL", "")
-EVOLUTION_API_KEY    = os.getenv("EVOLUTION_API_KEY", "")
 EVOLUTION_INSTANCE   = os.getenv("EVOLUTION_INSTANCE", "agendabot")
 
 PRODUCT_PLAN_MAP = {
@@ -38,13 +48,19 @@ EVENTOS_SUSPENDER = {
     "subscription_late", "reembolso", "assinatura_cancelada", "assinatura_atrasada"
 }
 
+PLAN_LABELS = {
+    "basico":  "Básico",
+    "pro":     "Pro",
+    "agencia": "Agência",
+}
+
 
 # ── Verificação HMAC ──────────────────────────────────────────────────────────
 
 def _verify_signature(body_bytes: bytes, request: Request) -> bool:
     """
-    A Kiwify usa HMAC-SHA1 para assinar o payload.
-    Gera: hmac(token_secreto, body_bytes, sha1) e compara com ?signature=xxx
+    Kiwify assina o payload com HMAC-SHA1 usando o token como chave.
+    A assinatura chega como query param ?signature=xxx
     """
     if not KIWIFY_WEBHOOK_TOKEN:
         print("[Billing] ⚠️ KIWIFY_WEBHOOK_TOKEN não configurado — aceitando sem verificação")
@@ -52,11 +68,9 @@ def _verify_signature(body_bytes: bytes, request: Request) -> bool:
 
     received_sig = request.query_params.get("signature", "")
     if not received_sig:
-        # Sem signature na URL — tenta aceitar (pode ser teste manual)
-        print("[Billing] ⚠️ Sem signature na URL — aceitando (possível teste manual)")
+        print("[Billing] ⚠️ Sem signature — aceitando (possível teste manual)")
         return True
 
-    # Calcula a assinatura esperada
     expected_sig = hmac.new(
         KIWIFY_WEBHOOK_TOKEN.encode("utf-8"),
         body_bytes,
@@ -65,7 +79,7 @@ def _verify_signature(body_bytes: bytes, request: Request) -> bool:
 
     resultado = hmac.compare_digest(expected_sig, received_sig)
     if not resultado:
-        print(f"[Billing] ❌ Signature inválida | esperada={expected_sig[:12]}... | recebida={received_sig[:12]}...")
+        print(f"[Billing] ❌ Signature inválida")
     return resultado
 
 
@@ -110,6 +124,10 @@ def _count_group_tenants(db: Session, email: str) -> int:
 
 
 def _criar_tenant(db: Session, email: str, name: str, phone: str, plan: str) -> Tenant:
+    """
+    Cria tenant com bot_active=False.
+    Bot só ativa após onboarding (você cria instância e configura WhatsApp).
+    """
     biz_name = name or email.split("@")[0]
     temp_pw  = secrets.token_urlsafe(12)
     hashed   = bcrypt.hashpw(temp_pw.encode(), bcrypt.gensalt()).decode()
@@ -138,11 +156,12 @@ def _criar_tenant(db: Session, email: str, name: str, phone: str, plan: str) -> 
         setup_done=False,
         dashboard_password=hashed,
         dashboard_token=secrets.token_urlsafe(32),
-        bot_active=False,
+        bot_active=False,  # ← inativo até onboarding concluído
     )
     db.add(tenant)
     db.flush()
 
+    # Serviço placeholder — atualizado durante onboarding
     db.add(Service(
         tenant_id=tenant.id,
         name="Serviço Padrão",
@@ -154,45 +173,39 @@ def _criar_tenant(db: Session, email: str, name: str, phone: str, plan: str) -> 
     ))
     db.commit()
     db.refresh(tenant)
+
+    # LGPD: não loga email nem telefone
     print(f"[Billing] ✅ Tenant criado: {tenant.id[:8]}... | plano={plan}")
     return tenant
 
 
-async def _enviar_whatsapp_setup(phone: str, tenant_name: str, setup_url: str):
-    if not phone or not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-        print("[Billing] WhatsApp não configurado — link de setup não enviado")
+async def _enviar_boas_vindas(phone: str, plan: str):
+    """
+    Envia WhatsApp de boas-vindas informando que entraremos em contato.
+    Não envia link técnico — o onboarding é feito por você (Matheus).
+    """
+    if not phone:
+        print("[Billing] Sem telefone — boas-vindas não enviada")
         return
 
     phone_clean = "".join(c for c in phone if c.isdigit())
     if not phone_clean:
-        print("[Billing] Número inválido para envio de WhatsApp")
         return
 
+    plan_label = PLAN_LABELS.get(plan, "Básico")
+
     mensagem = (
-        f"Olá! 🎉 Sua assinatura do *AgendaBot* foi confirmada!\n\n"
-        f"Agora é só configurar o seu bot. Clique no link abaixo e siga os passos — "
-        f"leva menos de 10 minutos:\n\n"
-        f"👉 {setup_url}\n\n"
-        f"Qualquer dúvida é só responder aqui. Boas vendas! 🚀"
+        f"Olá! 🎉 Sua assinatura do *AgendaBot {plan_label}* foi confirmada!\n\n"
+        f"Nossa equipe entrará em contato em breve para ativar o seu bot. "
+        f"O processo leva apenas 15 minutos.\n\n"
+        f"Fique de olho neste número! 😊"
     )
 
-    url     = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
-    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(
-                url,
-                json={"number": phone_clean, "text": mensagem},
-                headers=headers,
-                timeout=10,
-            )
-            if resp.status_code in (200, 201):
-                print("[Billing] ✅ WhatsApp de setup enviado com sucesso")
-            else:
-                print(f"[Billing] ❌ WhatsApp erro {resp.status_code}: {resp.text[:80]}")
-        except Exception as e:
-            print(f"[Billing] ❌ WhatsApp exceção: {e}")
+    success = await send_whatsapp_via_instance(phone_clean, mensagem, EVOLUTION_INSTANCE)
+    if success:
+        print(f"[Billing] ✅ Boas-vindas enviada | plano={plan}")
+    else:
+        print(f"[Billing] ⚠️ Boas-vindas não enviada (Evolution pode estar offline)")
 
 
 def _get_base_url(request: Request) -> str:
@@ -205,16 +218,12 @@ def _get_base_url(request: Request) -> str:
 
 @router.post("/billing/webhook")
 async def billing_webhook(request: Request):
-    # Lê o body como bytes ANTES de fazer json.loads
-    # Necessário para calcular HMAC com o body original
     try:
         body_bytes = await request.body()
-        import json
-        body = json.loads(body_bytes)
+        body       = json.loads(body_bytes)
     except Exception:
         return JSONResponse({"error": "Payload inválido"}, status_code=400)
 
-    # Verificação HMAC
     if not _verify_signature(body_bytes, request):
         return JSONResponse({"error": "Assinatura inválida"}, status_code=401)
 
@@ -222,9 +231,10 @@ async def billing_webhook(request: Request):
     customer = _get_customer_data(body)
     email    = customer["email"]
 
+    # LGPD: só loga se tem email, sem expor o valor
     print(f"[Billing] evento={event} | email_presente={'sim' if email else 'não'}")
 
-    # Log do payload em desenvolvimento
+    # Log de debug apenas em desenvolvimento
     if os.getenv("ENVIRONMENT") != "production":
         print(f"[Billing][DEBUG] payload keys: {list(body.keys())}")
 
@@ -233,7 +243,6 @@ async def billing_webhook(request: Request):
         return {"status": "ignored", "event": event}
 
     if not email:
-        print(f"[Billing] ⚠️ Email não encontrado no payload do evento '{event}'")
         return JSONResponse({"error": "Email não encontrado no payload"}, status_code=422)
 
     db = SessionLocal()
@@ -251,15 +260,16 @@ async def billing_webhook(request: Request):
             return {"status": "ok", "event": event, "action": "suspended", "count": len(tenants)}
 
         # ── ATIVAR / CRIAR ────────────────────────────────────────────────────
-        plan     = _get_plan(body)
-        base_url = _get_base_url(request)
+        plan = _get_plan(body)
 
         tenants_existentes = db.query(Tenant).filter(Tenant.billing_email == email).all()
 
         if tenants_existentes:
+            # Renovação — reativa tenants existentes
             for t in tenants_existentes:
                 t.plan_active = True
                 t.plan        = plan
+                # Só reativa bot se o setup/onboarding foi concluído
                 if getattr(t, 'setup_done', False):
                     t.bot_active = True
             db.commit()
@@ -271,27 +281,27 @@ async def billing_webhook(request: Request):
                 "count":  len(tenants_existentes),
             }
 
+        # Novo cliente
         if plan == "agencia":
             count = _count_group_tenants(db, email)
             if count >= 3:
-                print("[Billing] ⚠️ Limite de 3 tenants do plano Agência atingido")
+                print(f"[Billing] ⚠️ Limite de 3 tenants do plano Agência atingido")
                 return JSONResponse(
                     {"error": "Limite de 3 negócios do plano Agência atingido."},
                     status_code=422
                 )
 
-        tenant    = _criar_tenant(db, email, customer["name"], customer["phone"], plan)
-        setup_url = f"{base_url}/setup?token={tenant.setup_token}"
+        tenant = _criar_tenant(db, email, customer["name"], customer["phone"], plan)
 
-        await _enviar_whatsapp_setup(customer["phone"], tenant.display_name, setup_url)
+        # Envia boas-vindas informando que entraremos em contato
+        await _enviar_boas_vindas(customer["phone"], plan)
 
         return {
-            "status":        "ok",
-            "event":         event,
-            "action":        "created",
-            "tenant":        tenant.name,
-            "plan":          plan,
-            "setup_enviado": bool(customer["phone"]),
+            "status":  "ok",
+            "event":   event,
+            "action":  "created",
+            "tenant":  tenant.name,
+            "plan":    plan,
         }
 
     except Exception as e:

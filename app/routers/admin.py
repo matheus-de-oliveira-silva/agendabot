@@ -7,20 +7,19 @@ from datetime import datetime
 import pytz, os, bcrypt, secrets
 
 router = APIRouter()
-BRASILIA = pytz.timezone("America/Sao_Paulo")
+BRASILIA     = pytz.timezone("America/Sao_Paulo")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "troca-essa-senha-admin")
 
 BUSINESS_TYPES = {
-    "petshop": "🐾 Pet Shop",
-    "clinica": "🏥 Clínica Veterinária",
-    "adocao": "🐶 Clínica de Adoção",
+    "petshop":   "🐾 Pet Shop",
+    "clinica":   "🏥 Clínica Veterinária",
+    "adocao":    "🐶 Clínica de Adoção",
     "barbearia": "💈 Barbearia",
-    "salao": "💅 Salão de Beleza",
-    "estetica": "✨ Estética",
-    "outro": "⚙️ Outro",
+    "salao":     "💅 Salão de Beleza",
+    "estetica":  "✨ Estética",
+    "outro":     "⚙️ Outro",
 }
 
-# Ícones disponíveis por tipo de negócio (sugestões)
 ICON_SUGGESTIONS = {
     "petshop":   ["🐾", "🐶", "🐱", "🐕", "✂️"],
     "clinica":   ["🏥", "🩺", "💉", "🐾", "⚕️"],
@@ -46,18 +45,20 @@ ADDRESS_LABELS = [
 
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
+
 def check_admin(request: Request):
     token = request.cookies.get("admin_token") or request.headers.get("X-Admin-Token")
     return token == ADMIN_SECRET
 
 def get_base_url(request: Request) -> str:
-    host = request.headers.get("host", "")
+    host  = request.headers.get("host", "")
     proto = request.headers.get("x-forwarded-proto", "")
     if proto:
         return f"{proto}://{host}"
     if "localhost" in host or "127.0.0.1" in host:
         return f"http://{host}"
     return f"https://{host}"
+
 
 ADMIN_STYLE = """
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
@@ -90,12 +91,14 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .badge-green{background:#1a2e1a;color:#68d391}
 .badge-red{background:#2d1515;color:#fc8181}
 .badge-gray{background:#22263a;color:#9aa0b8}
+.badge-blue{background:#1a1d3a;color:#7c7de8}
 .service-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117}
 .form-group{margin-bottom:14px}
 .divider{height:1px;background:#2d3148;margin:20px 0}
 .alert{padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px}
 .alert-success{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}
 .alert-error{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}
+.alert-info{background:#1a1d3a;color:#a29bfe;border:1px solid rgba(162,155,254,.2)}
 .back{font-size:13px;color:#9aa0b8;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px}
 .back:hover{color:#7c7de8}
 .tag{font-size:11px;background:#23254a;color:#7c7de8;padding:2px 8px;border-radius:6px;font-weight:600}
@@ -120,23 +123,24 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .stat-mini-label{font-size:11px;color:#9aa0b8;margin-top:2px}
 .danger-zone{background:#1a0a0a;border:1px solid rgba(252,129,129,.2);border-radius:12px;padding:18px;margin-top:20px}
 .danger-title{font-size:13px;font-weight:700;color:#fc8181;margin-bottom:12px;display:flex;align-items:center;gap:6px}
-/* Tutorial WhatsApp */
 .tutorial-step{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid #2d3148}
 .tutorial-step:last-child{border-bottom:none}
 .step-num{width:28px;height:28px;border-radius:50%;background:#23254a;color:#7c7de8;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .step-text{font-size:13px;color:#9aa0b8;line-height:1.6}
 .step-text strong{color:#e8eaf2}
 .step-text a{color:#7c7de8;text-decoration:none}
-.step-text a:hover{text-decoration:underline}
 .code-box{background:#0f1117;border:1px solid #2d3148;border-radius:8px;padding:8px 12px;font-family:'DM Mono',monospace;font-size:12px;color:#a29bfe;margin-top:6px;word-break:break-all}
-/* Bloqueio de horários */
 .blocked-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117}
 .blocked-date{font-weight:700;font-size:13px;min-width:90px}
 .blocked-time{font-size:12px;color:#9aa0b8;flex:1}
 .blocked-reason{font-size:12px;color:#7c7de8}
+.onboarding-checklist{background:#1a2e1a;border:1px solid rgba(104,211,145,.2);border-radius:12px;padding:16px;margin-bottom:16px}
+.onboarding-step{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(104,211,145,.1);font-size:13px}
+.onboarding-step:last-child{border-bottom:none}
 @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}}
 </style>
 """
+
 
 def admin_login_page(error=""):
     err_html = f'<div class="alert alert-error">{error}</div>' if error else ""
@@ -156,13 +160,14 @@ def admin_login_page(error=""):
 <button type="submit" class="btn btn-primary" style="width:100%;padding:11px">Entrar</button>
 </form></div></div></div></body></html>""")
 
+
 @router.get("/admin/login", response_class=HTMLResponse)
 def login_page(): return admin_login_page()
 
 @router.post("/admin/login")
 async def do_login(request: Request):
     form = await request.form()
-    pw = form.get("password", "")
+    pw   = form.get("password", "")
     if pw == ADMIN_SECRET:
         resp = RedirectResponse("/admin", status_code=302)
         resp.set_cookie("admin_token", ADMIN_SECRET, httponly=True, max_age=86400*7)
@@ -175,30 +180,38 @@ def do_logout():
     resp.delete_cookie("admin_token")
     return resp
 
+
 @router.get("/admin", response_class=HTMLResponse)
 def admin_home(request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return RedirectResponse("/admin/login", status_code=302)
     base_url = get_base_url(request)
-    deleted = request.query_params.get("deleted") == "1"
-    alert = '<div class="alert alert-success" style="margin-bottom:16px">✅ Cliente deletado.</div>' if deleted else ""
-    tenants = db.query(Tenant).order_by(Tenant.created_at.desc()).all()
+    deleted  = request.query_params.get("deleted") == "1"
+    alert    = '<div class="alert alert-success" style="margin-bottom:16px">✅ Cliente deletado.</div>' if deleted else ""
+    tenants  = db.query(Tenant).order_by(Tenant.created_at.desc()).all()
+
     rows = ""
     for t in tenants:
-        count = db.query(Appointment).filter(Appointment.tenant_id == t.id).count()
+        count    = db.query(Appointment).filter(Appointment.tenant_id == t.id).count()
         clientes = db.query(Customer).filter(Customer.tenant_id == t.id).count()
-        tipo = BUSINESS_TYPES.get(t.business_type, t.business_type)
-        badge_pw = "badge-green" if t.dashboard_password else "badge-gray"
-        has_pw = "✅ Senha" if t.dashboard_password else "⚠️ Sem senha"
-        bot_status = "badge-green" if getattr(t, 'bot_active', True) else "badge-red"
-        bot_label = "🤖 Ativo" if getattr(t, 'bot_active', True) else "🤖 Pausado"
-        icon = getattr(t, 'tenant_icon', '🐾') or '🐾'
+        tipo     = BUSINESS_TYPES.get(t.business_type, t.business_type)
+        icon     = getattr(t, 'tenant_icon', '🐾') or '🐾'
         dash_url = f"{base_url}/dashboard?tid={t.id}"
-        plan_label = PLANS.get(getattr(t, 'plan', 'basico') or 'basico', '⭐ Básico')
+
+        plan_label  = PLANS.get(getattr(t, 'plan', 'basico') or 'basico', '⭐ Básico')
         plan_active = getattr(t, 'plan_active', True)
-        plan_badge = "badge-green" if plan_active else "badge-red"
-        setup_done = getattr(t, 'setup_done', False)
+        plan_badge  = "badge-green" if plan_active else "badge-red"
+
+        setup_done  = getattr(t, 'setup_done', False)
         setup_badge = "badge-green" if setup_done else "badge-gray"
         setup_label = "✅ Setup ok" if setup_done else "⚠️ Setup pendente"
+
+        bot_status = "badge-green" if getattr(t, 'bot_active', True) else "badge-red"
+        bot_label  = "🤖 Ativo" if getattr(t, 'bot_active', True) else "🤖 Pausado"
+
+        has_evo    = bool(getattr(t, 'phone_number_id', None))
+        evo_badge  = "badge-blue" if has_evo else "badge-gray"
+        evo_label  = f"📱 {t.phone_number_id}" if has_evo else "📱 Sem WhatsApp"
+
         rows += f"""
         <div class="tenant-row">
             <div class="tenant-icon">{icon}</div>
@@ -210,17 +223,17 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
             <span class="badge {plan_badge}">{plan_label}</span>
             <span class="badge {setup_badge}">{setup_label}</span>
             <span class="badge {bot_status}">{bot_label}</span>
-            <span class="badge {badge_pw}">{has_pw}</span>
+            <span class="badge {evo_badge}" style="font-size:10px">{evo_label}</span>
             <a href="{dash_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Painel</a>
             <a href="/admin/tenant/{t.id}" class="btn btn-outline btn-sm">⚙️ Config</a>
             <form method="POST" action="/admin/tenant/{t.id}/delete" onsubmit="return confirm('⚠️ DELETAR {t.display_name or t.name}?\\n\\nApaga TODOS os dados. Sem volta!')">
                 <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
             </form>
         </div>"""
+
     if not rows:
         rows = '<div style="color:#9aa0b8;text-align:center;padding:24px">Nenhum cliente ainda.</div>'
 
-    # Ícones iniciais para o form de novo cliente
     icon_opts_new = ''.join(
         f'<div class="icon-opt {"selected" if i==0 else ""}" data-icon="{ico}" onclick="selectIcon(this,\'new\')">{ico}</div>'
         for i, ico in enumerate(["🐾","💈","💅","✨","🏥","🐶","⚙️","📅"])
@@ -238,7 +251,10 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
 </div>
 
 <div class="card">
-    <div class="card-title">➕ Novo cliente</div>
+    <div class="card-title">➕ Novo cliente (criação manual)</div>
+    <div class="alert alert-info" style="margin-bottom:16px">
+        💡 Clientes que compram pela Kiwify são criados automaticamente. Use este formulário apenas para clientes de teste ou criações manuais.
+    </div>
     <form method="POST" action="/admin/tenant">
     <div class="grid2">
         <div class="form-group"><label>Nome do negócio *</label>
@@ -263,34 +279,15 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
         </div></div>
     </div>
     <div class="grid2">
-        <div class="form-group"><label>Instância Evolution API (ou Phone Number ID Meta)</label>
-        <input name="phone_number_id" placeholder="Ex: barbearia-joao">
-        <div style="font-size:11px;color:#9aa0b8;margin-top:4px">⚡ Evolution: nome da instância. Meta API: ID do número.</div></div>
-        <div class="form-group"><label>WA Token (somente Meta API — vazio para Evolution)</label>
-        <input name="wa_access_token" placeholder="EAAxxxxxxx... (só Meta API)"></div>
-    </div>
-    <div class="form-group"><label>WhatsApp do dono (para receber notificações de novos agendamentos)</label>
-    <input name="owner_phone" placeholder="Ex: 5511999999999 (com DDI e DDD, sem + ou espaços)"></div>
-    <div class="grid2">
         <div class="form-group"><label>Plano</label>
         <select name="plan">
             {''.join(f'<option value="{k}">{v}</option>' for k,v in PLANS.items())}
         </select></div>
-        <div class="form-group"><label>Email do comprador (Hotmart/Kiwify)</label>
+        <div class="form-group"><label>Email do comprador (Kiwify)</label>
         <input name="billing_email" placeholder="email@cliente.com" type="email"></div>
     </div>
-    <div class="form-group">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" name="needs_address" value="1" style="width:auto;margin:0">
-            <span>Este negócio coleta endereço do cliente (busca/entrega)</span>
-        </label>
-    </div>
-    <div class="form-group" id="address-label-group-new" style="display:none">
-        <label>Label do endereço</label>
-        <select name="address_label">
-            {''.join(f'<option value="{l}">{l}</option>' for l in ADDRESS_LABELS)}
-        </select>
-    </div>
+    <div class="form-group"><label>WhatsApp do dono</label>
+    <input name="owner_phone" placeholder="Ex: 5511999999999"></div>
     <div class="grid3">
         <div class="form-group"><label>Abre às</label>
         <input name="open_time" type="time" value="09:00"></div>
@@ -314,7 +311,6 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
 
 <script>
 const ICON_SUGGESTIONS = {str(ICON_SUGGESTIONS).replace("'", '"')};
-
 function selectIcon(el, suffix) {{
     document.querySelectorAll('#icons-' + suffix + ' .icon-opt').forEach(e => e.classList.remove('selected'));
     el.classList.add('selected');
@@ -334,19 +330,15 @@ function toggleDay(btn, suffix) {{
     const active = [...grid.querySelectorAll('.day-btn.active')].map(b => b.dataset.day);
     document.getElementById('open_days_' + suffix).value = active.join(',');
 }}
-document.addEventListener('DOMContentLoaded', function() {{
-    const cb = document.querySelector('input[name="needs_address"]');
-    const grp = document.getElementById('address-label-group-new');
-    if (cb && grp) cb.addEventListener('change', () => grp.style.display = cb.checked ? 'block' : 'none');
-}});
 </script>
 </body></html>""")
+
 
 @router.post("/admin/tenant")
 async def create_tenant(request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return RedirectResponse("/admin/login", status_code=302)
-    form = await request.form()
-    name = form.get("name", "").strip()
+    form   = await request.form()
+    name   = form.get("name", "").strip()
     raw_pw = form.get("dashboard_password", "").strip()
     if not name or not raw_pw: return RedirectResponse("/admin?error=campos", status_code=302)
     hashed = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt()).decode()
@@ -354,8 +346,6 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
         name=name, display_name=name,
         business_type=form.get("business_type", "petshop"),
         tenant_icon=form.get("tenant_icon", "🐾"),
-        phone_number_id=form.get("phone_number_id") or None,
-        wa_access_token=form.get("wa_access_token") or None,
         subject_label=form.get("subject_label", "Pet"),
         subject_label_plural=form.get("subject_label_plural", "Pets"),
         bot_attendant_name=form.get("bot_attendant_name", "Mari"),
@@ -365,8 +355,8 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
         close_time=form.get("close_time", "18:00"),
         owner_phone=form.get("owner_phone") or None,
         notify_new_appt=True,
-        needs_address=form.get("needs_address") == "1",
-        address_label=form.get("address_label", "Endereço de busca"),
+        needs_address=False,
+        address_label="Endereço de busca",
         plan=form.get("plan", "basico"),
         plan_active=True,
         billing_email=form.get("billing_email") or None,
@@ -374,7 +364,7 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
         setup_done=False,
         dashboard_password=hashed,
         dashboard_token=secrets.token_urlsafe(32),
-        bot_active=True,
+        bot_active=False,  # inativo até onboarding
     )
     db.add(tenant)
     db.flush()
@@ -382,6 +372,7 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
         db.add(s)
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant.id}?created=1", status_code=302)
+
 
 @router.post("/admin/tenant/{tenant_id}/delete")
 def delete_tenant(tenant_id: str, request: Request, db: Session = Depends(get_db)):
@@ -396,6 +387,7 @@ def delete_tenant(tenant_id: str, request: Request, db: Session = Depends(get_db
     db.delete(tenant)
     db.commit()
     return RedirectResponse("/admin?deleted=1", status_code=302)
+
 
 def _default_services(business_type, tenant_id):
     defaults = {
@@ -412,6 +404,7 @@ def _default_services(business_type, tenant_id):
         for n, d, p, c, desc in defaults.get(business_type, defaults["outro"])
     ]
 
+
 @router.get("/admin/tenant/{tenant_id}", response_class=HTMLResponse)
 def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return RedirectResponse("/admin/login", status_code=302)
@@ -419,28 +412,32 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     if not tenant: return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
 
     services = db.query(Service).filter(Service.tenant_id == tenant_id).order_by(Service.active.desc(), Service.name).all()
-    blocked = db.query(BlockedSlot).filter(BlockedSlot.tenant_id == tenant_id).order_by(BlockedSlot.date, BlockedSlot.time).all()
+    blocked  = db.query(BlockedSlot).filter(BlockedSlot.tenant_id == tenant_id).order_by(BlockedSlot.date, BlockedSlot.time).all()
 
     created = request.query_params.get("created") == "1"
     saved   = request.query_params.get("saved") == "1"
-    alert = ""
+    alert   = ""
     if created: alert = '<div class="alert alert-success">✅ Cliente criado com sucesso!</div>'
     if saved:   alert = '<div class="alert alert-success">✅ Salvo com sucesso!</div>'
 
-    base_url = get_base_url(request)
+    base_url      = get_base_url(request)
     dashboard_url = f"{base_url}/dashboard?tid={tenant_id}"
-    tipo = BUSINESS_TYPES.get(tenant.business_type, tenant.business_type)
-    current_icon = getattr(tenant, 'tenant_icon', '🐾') or '🐾'
+    webhook_url   = f"{base_url}/whatsapp/webhook"
+    tipo          = BUSINESS_TYPES.get(tenant.business_type, tenant.business_type)
+    current_icon  = getattr(tenant, 'tenant_icon', '🐾') or '🐾'
 
     total_appts   = db.query(Appointment).filter(Appointment.tenant_id == tenant_id).count()
     total_clients = db.query(Customer).filter(Customer.tenant_id == tenant_id).count()
-    active_appts  = db.query(Appointment).filter(Appointment.tenant_id == tenant_id, Appointment.status.in_(["confirmed","in_progress"])).count()
+    active_appts  = db.query(Appointment).filter(
+        Appointment.tenant_id == tenant_id,
+        Appointment.status.in_(["confirmed","in_progress"])
+    ).count()
 
     # Serviços
     svc_rows = ""
     for s in services:
         status_badge = '<span class="badge badge-green">Ativo</span>' if s.active else '<span class="badge badge-gray">Inativo</span>'
-        price_fmt = f"R$ {s.price/100:.2f}" if s.price else "Grátis"
+        price_fmt    = f"R$ {s.price/100:.2f}" if s.price else "Grátis"
         svc_rows += f"""<div class="service-row">
             <div style="width:12px;height:12px;border-radius:3px;flex-shrink:0;background:{s.color or '#6C5CE7'}"></div>
             <div style="flex:1"><div style="font-weight:600;font-size:14px">{s.name}</div>
@@ -466,44 +463,41 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" data-day="{i}" onclick="toggleDay(this,\'edit\')">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
-    bot_checked    = 'checked' if getattr(tenant, 'bot_active', True) else ''
-    notify_checked = 'checked' if getattr(tenant, 'notify_new_appt', True) else ''
+    bot_checked           = 'checked' if getattr(tenant, 'bot_active', True) else ''
+    notify_checked        = 'checked' if getattr(tenant, 'notify_new_appt', True) else ''
     needs_address_checked = 'checked' if getattr(tenant, 'needs_address', False) else ''
     current_address_label = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
-    current_plan    = getattr(tenant, 'plan', 'basico') or 'basico'
-    plan_active     = getattr(tenant, 'plan_active', True)
-    setup_done      = getattr(tenant, 'setup_done', False)
-    setup_token_val = getattr(tenant, 'setup_token', None) or ''
-    billing_email_val = getattr(tenant, 'billing_email', '') or ''
-    setup_url = f"{base_url}/setup?token={setup_token_val}" if setup_token_val else ""
-    if setup_url:
-        _cpbtn = "navigator.clipboard.writeText(document.getElementById('setup-url').textContent)"
-        setup_link_html = (
-            '<div class="link-box">'
-            '<div style="font-size:11px;color:#9aa0b8;margin-bottom:6px">Envie este link por email para o cliente:</div>'
-            f'<div class="link-url" id="setup-url">{setup_url}</div>'
-            '</div>'
-            '<div style="display:flex;gap:8px;margin-top:8px">'
-            f'<button onclick="{_cpbtn}" class="btn btn-outline btn-sm">Copiar link setup</button>'
-            '</div>'
-        )
-        setup_btn_label = 'Gerar novo link'
-    else:
-        setup_link_html = '<div style="color:#9aa0b8;font-size:13px;margin-bottom:8px">Nenhum link gerado ainda.</div>'
-        setup_btn_label = 'Gerar link de setup'
+    current_plan          = getattr(tenant, 'plan', 'basico') or 'basico'
+    plan_active           = getattr(tenant, 'plan_active', True)
+    setup_done            = getattr(tenant, 'setup_done', False)
+    billing_email_val     = getattr(tenant, 'billing_email', '') or ''
 
-    # Ícones
-    suggestions = ICON_SUGGESTIONS.get(tenant.business_type, ICON_SUGGESTIONS['outro'])
-    all_icons = list(dict.fromkeys(suggestions + ["🐾","💈","💅","✨","🏥","🐶","⚙️","📅","🌟","🎯"]))
-    icon_opts = ''.join(
-        f'<div class="icon-opt {"selected" if ico == current_icon else ""}" data-icon="{ico}" onclick="selectIcon(this,\'edit\')">{ico}</div>'
-        for ico in all_icons
-    )
+    # Evolution por tenant
+    current_evo_url = getattr(tenant, 'evolution_url', '') or ''
+    current_evo_key = getattr(tenant, 'evolution_key', '') or ''
+    current_instance = tenant.phone_number_id or ''
+
+    # Onboarding checklist
+    has_instance  = bool(tenant.phone_number_id)
+    has_services  = any(s.active for s in services)
+    has_owner_ph  = bool(getattr(tenant, 'owner_phone', None))
+    onboard_steps = [
+        (has_instance,  "WhatsApp conectado (instância Evolution configurada)"),
+        (has_services,  "Serviços cadastrados"),
+        (has_owner_ph,  "Número do dono configurado (para receber notificações)"),
+        (setup_done,    "Setup/onboarding concluído"),
+        (getattr(tenant,'bot_active',False), "Bot ativo"),
+    ]
+    onboard_html = ""
+    for ok, label in onboard_steps:
+        icon  = "✅" if ok else "⬜"
+        color = "#68d391" if ok else "#9aa0b8"
+        onboard_html += f'<div class="onboarding-step"><span>{icon}</span><span style="color:{color}">{label}</span></div>'
 
     # Horários bloqueados
     blocked_rows = ""
     for b in blocked:
-        time_label = b.time if b.time else "Dia inteiro"
+        time_label   = b.time if b.time else "Dia inteiro"
         reason_label = f'<span class="blocked-reason">{b.reason}</span>' if b.reason else ""
         blocked_rows += f"""<div class="blocked-row">
             <div class="blocked-date">{b.date}</div>
@@ -515,6 +509,14 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         </div>"""
     if not blocked_rows:
         blocked_rows = '<div style="color:#9aa0b8;font-size:13px;padding:10px 0">Nenhum horário bloqueado.</div>'
+
+    # Ícones
+    suggestions = ICON_SUGGESTIONS.get(tenant.business_type, ICON_SUGGESTIONS['outro'])
+    all_icons   = list(dict.fromkeys(suggestions + ["🐾","💈","💅","✨","🏥","🐶","⚙️","📅","🌟","🎯"]))
+    icon_opts   = ''.join(
+        f'<div class="icon-opt {"selected" if ico == current_icon else ""}" data-icon="{ico}" onclick="selectIcon(this,\'edit\')">{ico}</div>'
+        for ico in all_icons
+    )
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>Admin — {tenant.display_name or tenant.name}</title>{ADMIN_STYLE}</head><body>
@@ -530,11 +532,25 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     <div class="stat-mini"><div class="stat-mini-num">{active_appts}</div><div class="stat-mini-label">Em aberto</div></div>
 </div>
 
-<!-- Link -->
+<!-- Onboarding checklist -->
 <div class="card">
-    <div class="card-title">🔗 Acesso do cliente <span class="tag">{tipo}</span></div>
+    <div class="card-title">🚀 Onboarding do cliente <span class="tag">{tipo}</span></div>
+    <div class="onboarding-checklist">{onboard_html}</div>
+    <div style="font-size:12px;color:#9aa0b8;line-height:1.7">
+        <strong style="color:#e8eaf2">Checklist de ativação:</strong><br>
+        1. Cliente compra → aparece aqui automaticamente (bot pausado)<br>
+        2. Você liga para o cliente e faz uma chamada de 15 min<br>
+        3. No painel da Evolution (<a href="#evo-config" style="color:#7c7de8">configurar abaixo</a>), cria a instância e escaneia o QR Code<br>
+        4. Preenche a instância no campo "WhatsApp" abaixo e salva<br>
+        5. Ativa o bot no toggle abaixo → cliente está no ar! 🎉
+    </div>
+</div>
+
+<!-- Link do painel -->
+<div class="card">
+    <div class="card-title">🔗 Acesso do cliente</div>
     <div class="link-box">
-        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel — envie para o cliente</div>
+        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel — envie para o cliente após onboarding</div>
         <div class="link-url" id="dash-url">{dashboard_url}</div>
     </div>
     <div style="display:flex;gap:8px">
@@ -543,9 +559,9 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </div>
 </div>
 
-<!-- Plano e Setup -->
+<!-- Plano -->
 <div class="card">
-    <div class="card-title">💼 Plano e acesso de setup</div>
+    <div class="card-title">💼 Plano e assinatura</div>
     <div class="grid2" style="margin-bottom:16px">
         <div>
             <div style="font-size:11px;color:#9aa0b8;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Plano atual</div>
@@ -555,13 +571,11 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
             </div>
         </div>
         <div>
-            <div style="font-size:11px;color:#9aa0b8;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Setup do cliente</div>
-            <div style="display:flex;align-items:center;gap:8px">
-                <span class="badge {'badge-green' if setup_done else 'badge-gray'}">{'✅ Concluído' if setup_done else '⚠️ Pendente'}</span>
-            </div>
+            <div style="font-size:11px;color:#9aa0b8;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Onboarding</div>
+            <span class="badge {'badge-green' if setup_done else 'badge-gray'}">{'✅ Concluído' if setup_done else '⚠️ Pendente'}</span>
         </div>
     </div>
-    <form method="POST" action="/admin/tenant/{tenant_id}/plan" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px">
+    <form method="POST" action="/admin/tenant/{tenant_id}/plan" style="display:flex;gap:8px;align-items:flex-end">
         <div style="flex:1">
             <label>Alterar plano</label>
             <select name="plan">
@@ -569,7 +583,7 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
             </select>
         </div>
         <div style="flex:1">
-            <label>Email Hotmart/Kiwify</label>
+            <label>Email Kiwify</label>
             <input name="billing_email" type="email" value="{billing_email_val}" placeholder="email@cliente.com">
         </div>
         <div style="display:flex;gap:6px">
@@ -577,15 +591,9 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
             <button type="submit" name="action" value="suspend" class="btn btn-danger btn-sm" onclick="return confirm('Suspender assinatura?')" style="white-space:nowrap">{'▶ Reativar' if not plan_active else '⏸ Suspender'}</button>
         </div>
     </form>
-    <div class="divider"></div>
-    <div style="font-size:13px;font-weight:700;margin-bottom:10px">🔗 Link de setup para o cliente</div>
-    {setup_link_html}
-    <form method="POST" action="/admin/tenant/{tenant_id}/generate-setup-link" style="display:inline">
-        <button type="submit" class="btn btn-success btn-sm">{setup_btn_label}</button>
-    </form>
 </div>
 
-<!-- Config -->
+<!-- Configurações do negócio -->
 <div class="card">
     <div class="card-title">🏢 Configurações do negócio</div>
     <form method="POST" action="/admin/tenant/{tenant_id}/config">
@@ -610,20 +618,40 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         <div class="form-group"><label>Sujeito plural</label>
         <input name="subject_label_plural" value="{tenant.subject_label_plural or 'Pets'}"></div>
     </div>
-    <div class="grid2">
-        <div class="form-group">
-            <label>Instância Evolution API (ou Phone Number ID Meta)</label>
-            <input name="phone_number_id" value="{tenant.phone_number_id or ''}" placeholder="Ex: barbearia-joao">
-            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">⚡ Evolution: nome da instância. Meta API: ID do número.</div>
-        </div>
-        <div class="form-group">
-            <label>WA Token (somente Meta API — vazio para Evolution)</label>
-            <input name="wa_access_token" value="{tenant.wa_access_token or ''}" placeholder="EAAxxxxxxx... (só Meta API)">
-            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">⚡ Evolution API: deixe em branco.</div>
+    <div class="form-group"><label>WhatsApp do dono (notificações)</label>
+    <input name="owner_phone" value="{getattr(tenant,'owner_phone','') or ''}" placeholder="5511999999999"></div>
+
+    <div class="divider"></div>
+    <div class="section-title" id="evo-config">📱 WhatsApp — Evolution API</div>
+
+    <div class="alert alert-info" style="margin-bottom:14px">
+        💡 <strong>Como conectar:</strong> Acesse o painel da sua Evolution API, crie uma instância com o nome do cliente,
+        escaneie o QR Code com o WhatsApp Business dele, aguarde "Connected" e preencha abaixo.
+    </div>
+
+    <div class="form-group">
+        <label>Nome da instância *</label>
+        <input name="phone_number_id" value="{current_instance}" placeholder="Ex: barbearia-joao">
+        <div style="font-size:11px;color:#9aa0b8;margin-top:4px">
+            Exatamente como foi criado na Evolution (sem espaços).
+            Após preencher, configure o webhook na Evolution apontando para:<br>
+            <code style="color:#a29bfe">{webhook_url}</code> — evento: <code style="color:#a29bfe">MESSAGES_UPSERT</code>
         </div>
     </div>
-    <div class="form-group"><label>WhatsApp do dono (notificações de novos agendamentos)</label>
-    <input name="owner_phone" value="{getattr(tenant,'owner_phone','') or ''}" placeholder="5511999999999"></div>
+
+    <div class="grid2">
+        <div class="form-group">
+            <label>URL Evolution (opcional — só se diferente do padrão)</label>
+            <input name="evolution_url" value="{current_evo_url}" placeholder="https://evolution-2.seudominio.com">
+            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Deixe vazio para usar o servidor Evolution padrão</div>
+        </div>
+        <div class="form-group">
+            <label>API Key Evolution (opcional — só se diferente do padrão)</label>
+            <input name="evolution_key" value="{current_evo_key}" placeholder="Deixe vazio para usar a chave padrão">
+            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Deixe vazio para usar a chave Evolution padrão</div>
+        </div>
+    </div>
+
     <div class="divider"></div>
     <div class="section-title">📍 Endereço e entrega</div>
     <div class="form-group">
@@ -633,12 +661,13 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
             <span style="font-size:13px;color:#e8eaf2;font-weight:600">Este negócio coleta endereço do cliente</span>
         </label>
         <div id="address-label-edit" style="display:{'block' if needs_address_checked else 'none'};margin-top:10px">
-            <label>Label do endereço (como aparece no bot e no painel)</label>
+            <label>Label do endereço</label>
             <select name="address_label">
                 {''.join(f'<option value="{l}" {"selected" if l==current_address_label else ""}>{l}</option>' for l in ADDRESS_LABELS)}
             </select>
         </div>
     </div>
+
     <div class="divider"></div>
     <div class="section-title">⏰ Horário de funcionamento</div>
     <div class="grid2">
@@ -652,6 +681,7 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         <div class="days-grid" id="days-edit">{days_btns}</div>
         <input type="hidden" name="open_days" id="open_days_edit" value="{getattr(tenant,'open_days','0,1,2,3,4,5') or '0,1,2,3,4,5'}">
     </div>
+
     <div class="divider"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div style="display:flex;gap:20px;flex-wrap:wrap">
@@ -682,102 +712,6 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </div>
     </form>
 </div>
-
-<!-- Tutorial WhatsApp -->
-<div class="card">
-    <div class="card-title">📱 Como conectar o WhatsApp</div>
-
-    <!-- Tabs de modo -->
-    <div style="display:flex;gap:8px;margin-bottom:20px">
-        <button onclick="showMode('evolution',this)" id="btn-evo" class="btn btn-primary btn-sm">⚡ Evolution API (recomendado)</button>
-        <button onclick="showMode('meta',this)" id="btn-meta" class="btn btn-outline btn-sm">🏢 Meta API Oficial</button>
-    </div>
-
-    <!-- Evolution API -->
-    <div id="mode-evolution">
-        <div style="background:#1a2e1a;border:1px solid rgba(104,211,145,.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#68d391">
-            ⚡ <strong>Mais fácil e rápido</strong> — conecta qualquer número WhatsApp via QR Code em minutos. Ideal para começar.
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">1</div>
-            <div class="step-text">Você precisa ter a <strong>Evolution API</strong> rodando. Se ainda não tem, instale com Docker:<br>
-            <div class="code-box">docker run -d -p 8080:8080 --name evolution atendai/evolution-api:latest</div>
-            Ou use um serviço hospedado como <a href="https://evolution-api.com" target="_blank">evolution-api.com</a>.</div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">2</div>
-            <div class="step-text">Acesse o painel da Evolution API (normalmente em <strong>http://seu-servidor:8080</strong>) e crie uma nova instância com o nome do cliente.<br>
-            <div class="code-box">Nome sugerido: barbearia-joao (sem espaços)</div></div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">3</div>
-            <div class="step-text">Conecte o número escaneando o <strong>QR Code</strong> que aparece no painel da Evolution com o WhatsApp Business do cliente. Aguarde aparecer "Connected".</div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">4</div>
-            <div class="step-text">Cole o <strong>nome da instância</strong> no campo "Instância Evolution API" acima.<br>
-            <div class="code-box">Ex: barbearia-joao</div></div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">5</div>
-            <div class="step-text">Configure o Webhook na Evolution API apontando para:<br>
-            <div class="code-box">{get_base_url(request)}/whatsapp/webhook</div>
-            Evento: marque <strong>MESSAGES_UPSERT</strong> e salve.</div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">6</div>
-            <div class="step-text">Configure as variáveis de ambiente no Railway:<br>
-            <div class="code-box">EVOLUTION_API_URL=http://seu-servidor:8080
-EVOLUTION_API_KEY=sua-api-key
-EVOLUTION_INSTANCE=barbearia-joao</div>
-            Depois salve as configurações acima. ✅</div>
-        </div>
-    </div>
-
-    <!-- Meta API Oficial -->
-    <div id="mode-meta" style="display:none">
-        <div style="background:#2a2200;border:1px solid rgba(246,201,14,.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#f6c90e">
-            🏢 <strong>Mais burocrático</strong> — requer aprovação da Meta e verificação de empresa. Melhor para volumes altos e uso profissional.
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">1</div>
-            <div class="step-text">Acesse <a href="https://developers.facebook.com" target="_blank">developers.facebook.com</a> e faça login com a conta Facebook do cliente.</div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">2</div>
-            <div class="step-text">Crie um <strong>App do tipo Business</strong>. No painel, vá em <strong>Adicionar produto</strong> e selecione <strong>WhatsApp</strong>.</div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">3</div>
-            <div class="step-text">Em <strong>WhatsApp → Configuração</strong>, você verá o <strong>Phone Number ID</strong> — cole no campo "Instância" acima.<br>
-            <div class="code-box">Exemplo: 123456789012345</div></div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">4</div>
-            <div class="step-text">Clique em <strong>Gerar token de acesso</strong>. Cole no campo <strong>WA Token</strong> acima.<br>
-            <div class="code-box">Começa com: EAAxxxxxxx...</div></div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">5</div>
-            <div class="step-text">Configure o Webhook em <strong>WhatsApp → Configuração → Webhooks</strong>:<br>
-            URL: <div class="code-box">{get_base_url(request)}/webhook</div>
-            Token: <div class="code-box">{os.getenv('WHATSAPP_VERIFY_TOKEN','agendabot123')}</div></div>
-        </div>
-        <div class="tutorial-step">
-            <div class="step-num">6</div>
-            <div class="step-text">Marque o evento <strong>messages</strong> no webhook, salve e teste. ✅</div>
-        </div>
-    </div>
-</div>
-
-<script>
-function showMode(mode, btn) {{
-    document.getElementById('mode-evolution').style.display = mode==='evolution' ? '' : 'none';
-    document.getElementById('mode-meta').style.display      = mode==='meta'      ? '' : 'none';
-    document.getElementById('btn-evo').className  = mode==='evolution' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
-    document.getElementById('btn-meta').className = mode==='meta'      ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
-}}
-</script>
 
 <!-- Serviços -->
 <div class="card">
@@ -816,7 +750,7 @@ function showMode(mode, btn) {{
         <div class="form-group"><label>Data *</label>
         <input name="date" type="date" required></div>
         <div class="form-group"><label>Horário (vazio = dia inteiro)</label>
-        <input name="time" type="time" placeholder="Deixe vazio para bloquear o dia todo"></div>
+        <input name="time" type="time"></div>
         <div class="form-group"><label>Motivo</label>
         <input name="reason" placeholder="Ex: Férias, Feriado local..."></div>
     </div>
@@ -864,35 +798,47 @@ function toggleAddressLabel(checked, suffix) {{
 </script>
 </body></html>""")
 
+
 @router.post("/admin/tenant/{tenant_id}/config")
 async def save_config(tenant_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     form = await request.form()
-    t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    t    = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
+
     t.display_name         = form.get("display_name", t.display_name)
     t.business_type        = form.get("business_type", t.business_type)
     t.tenant_icon          = form.get("tenant_icon", getattr(t, 'tenant_icon', '🐾'))
     t.subject_label        = form.get("subject_label", t.subject_label)
     t.subject_label_plural = form.get("subject_label_plural", t.subject_label_plural)
     t.bot_attendant_name   = form.get("bot_attendant_name", getattr(t, 'bot_attendant_name', 'Mari'))
-    t.phone_number_id      = form.get("phone_number_id") or t.phone_number_id
-    t.wa_access_token      = form.get("wa_access_token") or t.wa_access_token
+    t.owner_phone          = form.get("owner_phone") or getattr(t, 'owner_phone', None)
     t.open_time            = form.get("open_time", getattr(t, 'open_time', '09:00'))
     t.close_time           = form.get("close_time", getattr(t, 'close_time', '18:00'))
     t.open_days            = form.get("open_days", getattr(t, 'open_days', '0,1,2,3,4,5'))
-    t.owner_phone          = form.get("owner_phone") or getattr(t, 'owner_phone', None)
     t.bot_active           = form.get("bot_active") == "1"
     t.notify_new_appt      = form.get("notify_new_appt") == "1"
     t.needs_address        = form.get("needs_address") == "1"
     t.address_label        = form.get("address_label") or getattr(t, 'address_label', 'Endereço de busca')
+
+    # WhatsApp / Evolution
+    if form.get("phone_number_id"):
+        t.phone_number_id = form.get("phone_number_id")
+    t.evolution_url = form.get("evolution_url") or None
+    t.evolution_key = form.get("evolution_key") or None
+
+    # Marca setup como concluído se WhatsApp foi configurado
+    if t.phone_number_id and not t.setup_done:
+        t.setup_done = True
+
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
 
 @router.post("/admin/tenant/{tenant_id}/password")
 async def save_password(tenant_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    form = await request.form()
+    form   = await request.form()
     raw_pw = form.get("password", "").strip()
     if not raw_pw: return RedirectResponse(f"/admin/tenant/{tenant_id}", status_code=302)
     t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -900,6 +846,7 @@ async def save_password(tenant_id: str, request: Request, db: Session = Depends(
         t.dashboard_password = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt()).decode()
         db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
 
 @router.post("/admin/tenant/{tenant_id}/service")
 async def add_service(tenant_id: str, request: Request, db: Session = Depends(get_db)):
@@ -909,16 +856,23 @@ async def add_service(tenant_id: str, request: Request, db: Session = Depends(ge
     if not name: return RedirectResponse(f"/admin/tenant/{tenant_id}", status_code=302)
     try: price_cents = int(float(form.get("price","0")) * 100)
     except: price_cents = 0
-    db.add(Service(tenant_id=tenant_id, name=name, duration_min=int(form.get("duration_min",60)),
-        price=price_cents, description=form.get("description",""), color=form.get("color","#6C5CE7"), active=True))
+    db.add(Service(
+        tenant_id=tenant_id, name=name,
+        duration_min=int(form.get("duration_min", 60)),
+        price=price_cents,
+        description=form.get("description",""),
+        color=form.get("color","#6C5CE7"),
+        active=True
+    ))
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
 
 @router.post("/admin/tenant/{tenant_id}/service/{service_id}/edit")
 async def edit_service(tenant_id: str, service_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     form = await request.form()
-    svc = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant_id).first()
+    svc  = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant_id).first()
     if svc:
         try: svc.price = int(float(form.get("price", svc.price/100)) * 100)
         except: pass
@@ -927,78 +881,64 @@ async def edit_service(tenant_id: str, service_id: str, request: Request, db: Se
         db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
+
 @router.post("/admin/tenant/{tenant_id}/service/{service_id}/toggle")
 def toggle_service(tenant_id: str, service_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     svc = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant_id).first()
-    if svc: svc.active = not svc.active; db.commit()
+    if svc:
+        svc.active = not svc.active
+        db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
+
 
 @router.post("/admin/tenant/{tenant_id}/service/{service_id}/delete")
 def delete_service(tenant_id: str, service_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     svc = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant_id).first()
-    if svc: db.delete(svc); db.commit()
+    if svc:
+        db.delete(svc)
+        db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
-# ── Bloqueio de horários ──────────────────────────────────────────────────────
+
 @router.post("/admin/tenant/{tenant_id}/blocked")
 async def add_blocked(tenant_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    form = await request.form()
-    date = form.get("date", "").strip()
+    form     = await request.form()
+    date     = form.get("date", "").strip()
     if not date: return RedirectResponse(f"/admin/tenant/{tenant_id}", status_code=302)
     time_val = form.get("time", "").strip() or None
-    reason = form.get("reason", "").strip() or None
+    reason   = form.get("reason", "").strip() or None
     from ..models import BlockedSlot
     import uuid
     db.add(BlockedSlot(id=str(uuid.uuid4()), tenant_id=tenant_id, date=date, time=time_val, reason=reason))
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
+
 @router.post("/admin/tenant/{tenant_id}/blocked/{blocked_id}/delete")
 def delete_blocked(tenant_id: str, blocked_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
     b = db.query(BlockedSlot).filter(BlockedSlot.id == blocked_id, BlockedSlot.tenant_id == tenant_id).first()
-    if b: db.delete(b); db.commit()
+    if b:
+        db.delete(b)
+        db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
-# ── Gerar link de setup ──────────────────────────────────────────────────────
-@router.post("/admin/tenant/{tenant_id}/generate-setup-link")
-def generate_setup_link(tenant_id: str, request: Request, db: Session = Depends(get_db)):
-    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
-    t.setup_token = secrets.token_urlsafe(32)
-    t.setup_done  = False
-    db.commit()
-    return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
 
-# ── Alterar plano / suspender ─────────────────────────────────────────────────
 @router.post("/admin/tenant/{tenant_id}/plan")
 async def update_plan(tenant_id: str, request: Request, db: Session = Depends(get_db)):
     if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    form = await request.form()
-    t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    form   = await request.form()
+    t      = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
     action = form.get("action", "save")
     if action == "suspend":
         t.plan_active = not getattr(t, 'plan_active', True)
         t.bot_active  = t.plan_active
     else:
-        t.plan = form.get("plan", getattr(t, 'plan', 'basico'))
+        t.plan          = form.get("plan", getattr(t, 'plan', 'basico'))
         t.billing_email = form.get("billing_email") or getattr(t, 'billing_email', None)
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
-
-# ── Migração v3 via HTTP ──────────────────────────────────────────────────────
-@router.post("/admin/migrate-v3")
-def migrate_v3_route(request: Request):
-    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    from ..database import engine
-    from migrate_v3 import run_migration
-    try:
-        results = run_migration(engine)
-        return {"success": True, "results": results}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
