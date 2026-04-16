@@ -1,3 +1,14 @@
+"""
+admin.py — Painel administrativo do BotGen SaaS.
+
+Correções v2:
+- Rebranding: AgendaBot → BotGen
+- Botão "Reenviar Setup" para clientes que fecharam o wizard sem concluir
+- setup_done NÃO é marcado ao salvar instância no admin — só quando cliente conclui o wizard
+- bot_business_name sincronizado ao salvar display_name
+- Rota POST /admin/tenant/{id}/resend-setup
+"""
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -9,6 +20,7 @@ import pytz, os, bcrypt, secrets
 router = APIRouter()
 BRASILIA     = pytz.timezone("America/Sao_Paulo")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "troca-essa-senha-admin")
+APP_URL      = os.getenv("APP_URL", "")
 
 BUSINESS_TYPES = {
     "petshop":   "🐾 Pet Shop",
@@ -45,12 +57,20 @@ ADDRESS_LABELS = [
 
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
+CHECKOUT_LINKS = {
+    "basico":  "https://pay.kiwify.com.br/ypIXFRM",
+    "pro":     "https://pay.kiwify.com.br/pndpF39",
+    "agencia": "https://pay.kiwify.com.br/O0oUFkt",
+}
+
 
 def check_admin(request: Request):
     token = request.cookies.get("admin_token") or request.headers.get("X-Admin-Token")
     return token == ADMIN_SECRET
 
 def get_base_url(request: Request) -> str:
+    if APP_URL:
+        return APP_URL.rstrip("/")
     host  = request.headers.get("host", "")
     proto = request.headers.get("x-forwarded-proto", "")
     if proto:
@@ -80,18 +100,20 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .btn-primary{background:#5B5BD6;color:#fff}.btn-primary:hover{background:#7c7de8}
 .btn-danger{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}.btn-danger:hover{background:#c62828;color:#fff}
 .btn-success{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}.btn-success:hover{background:#243d24}
+.btn-warn{background:#2a2200;color:#f6c90e;border:1px solid rgba(246,201,14,.2)}.btn-warn:hover{background:#3a3000;color:#fff}
 .btn-sm{padding:5px 12px;font-size:12px;border-radius:8px}
 .btn-outline{background:transparent;color:#9aa0b8;border:1px solid #2d3148}.btn-outline:hover{border-color:#7c7de8;color:#7c7de8}
-.tenant-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid #2d3148;border-radius:12px;margin-bottom:10px;background:#22263a;transition:border-color .2s}
+.tenant-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid #2d3148;border-radius:12px;margin-bottom:10px;background:#22263a;transition:border-color .2s;flex-wrap:wrap}
 .tenant-row:hover{border-color:#7c7de8}
 .tenant-icon{font-size:24px;width:40px;text-align:center}
-.tenant-name{font-weight:700;font-size:15px;flex:1}
+.tenant-name{font-weight:700;font-size:15px;flex:1;min-width:120px}
 .tenant-type{font-size:12px;color:#9aa0b8;background:#1a1d27;padding:3px 10px;border-radius:20px}
-.badge{font-size:11px;padding:3px 8px;border-radius:10px;font-weight:600}
+.badge{font-size:11px;padding:3px 8px;border-radius:10px;font-weight:600;white-space:nowrap}
 .badge-green{background:#1a2e1a;color:#68d391}
 .badge-red{background:#2d1515;color:#fc8181}
 .badge-gray{background:#22263a;color:#9aa0b8}
 .badge-blue{background:#1a1d3a;color:#7c7de8}
+.badge-warn{background:#2a2200;color:#f6c90e}
 .service-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117}
 .form-group{margin-bottom:14px}
 .divider{height:1px;background:#2d3148;margin:20px 0}
@@ -99,6 +121,7 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .alert-success{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}
 .alert-error{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}
 .alert-info{background:#1a1d3a;color:#a29bfe;border:1px solid rgba(162,155,254,.2)}
+.alert-warn{background:#2a2200;color:#f6c90e;border:1px solid rgba(246,201,14,.2)}
 .back{font-size:13px;color:#9aa0b8;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px}
 .back:hover{color:#7c7de8}
 .tag{font-size:11px;background:#23254a;color:#7c7de8;padding:2px 8px;border-radius:6px;font-weight:600}
@@ -116,27 +139,17 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 .slider:before{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}
 .toggle-switch input:checked + .slider{background:#5B5BD6}
 .toggle-switch input:checked + .slider:before{transform:translateX(20px)}
-.link-box{background:#0f1117;border:1px solid #2d3148;border-radius:10px;padding:14px;margin-bottom:18px}
+.link-box{background:#0f1117;border:1px solid #2d3148;border-radius:10px;padding:14px;margin-bottom:12px}
 .link-url{font-family:'DM Mono',monospace;font-size:13px;color:#7c7de8;word-break:break-all}
 .stat-mini{background:#0f1117;border:1px solid #2d3148;border-radius:10px;padding:12px 16px;text-align:center}
 .stat-mini-num{font-size:24px;font-weight:800;color:#7c7de8}
 .stat-mini-label{font-size:11px;color:#9aa0b8;margin-top:2px}
 .danger-zone{background:#1a0a0a;border:1px solid rgba(252,129,129,.2);border-radius:12px;padding:18px;margin-top:20px}
-.danger-title{font-size:13px;font-weight:700;color:#fc8181;margin-bottom:12px;display:flex;align-items:center;gap:6px}
-.tutorial-step{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid #2d3148}
-.tutorial-step:last-child{border-bottom:none}
-.step-num{width:28px;height:28px;border-radius:50%;background:#23254a;color:#7c7de8;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.step-text{font-size:13px;color:#9aa0b8;line-height:1.6}
-.step-text strong{color:#e8eaf2}
-.step-text a{color:#7c7de8;text-decoration:none}
-.code-box{background:#0f1117;border:1px solid #2d3148;border-radius:8px;padding:8px 12px;font-family:'DM Mono',monospace;font-size:12px;color:#a29bfe;margin-top:6px;word-break:break-all}
-.blocked-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117}
-.blocked-date{font-weight:700;font-size:13px;min-width:90px}
-.blocked-time{font-size:12px;color:#9aa0b8;flex:1}
-.blocked-reason{font-size:12px;color:#7c7de8}
+.danger-title{font-size:13px;font-weight:700;color:#fc8181;margin-bottom:12px}
 .onboarding-checklist{background:#1a2e1a;border:1px solid rgba(104,211,145,.2);border-radius:12px;padding:16px;margin-bottom:16px}
 .onboarding-step{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(104,211,145,.1);font-size:13px}
 .onboarding-step:last-child{border-bottom:none}
+.setup-box{background:#23254a;border:1px solid rgba(124,58,237,0.4);border-radius:12px;padding:16px;margin-top:14px}
 @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}}
 </style>
 """
@@ -145,12 +158,12 @@ input:focus,select:focus,textarea:focus{border-color:#7c7de8;box-shadow:0 0 0 3p
 def admin_login_page(error=""):
     err_html = f'<div class="alert alert-error">{error}</div>' if error else ""
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Admin Login</title>{ADMIN_STYLE}</head><body>
+<title>Admin — BotGen</title>{ADMIN_STYLE}</head><body>
 <div style="min-height:100vh;display:flex;align-items:center;justify-content:center">
 <div style="width:360px">
 <div style="text-align:center;margin-bottom:28px">
 <div style="font-size:32px">🔐</div>
-<div style="font-size:22px;font-weight:800;color:#7c7de8;margin-top:8px">Admin</div>
+<div style="font-size:22px;font-weight:800;color:#7c7de8;margin-top:8px">BotGen Admin</div>
 <div style="font-size:13px;color:#9aa0b8;margin-top:4px">Acesso restrito</div>
 </div>
 <div class="card">{err_html}
@@ -202,29 +215,29 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
         plan_badge  = "badge-green" if plan_active else "badge-red"
 
         setup_done  = getattr(t, 'setup_done', False)
-        setup_badge = "badge-green" if setup_done else "badge-gray"
-        setup_label = "✅ Setup ok" if setup_done else "⚠️ Setup pendente"
+        setup_badge = "badge-green" if setup_done else "badge-warn"
+        setup_label = "✅ Setup ok" if setup_done else "⚠️ Pendente"
 
         bot_status = "badge-green" if getattr(t, 'bot_active', True) else "badge-red"
         bot_label  = "🤖 Ativo" if getattr(t, 'bot_active', True) else "🤖 Pausado"
 
-        has_evo    = bool(getattr(t, 'phone_number_id', None))
-        evo_badge  = "badge-blue" if has_evo else "badge-gray"
-        evo_label  = f"📱 {t.phone_number_id}" if has_evo else "📱 Sem WhatsApp"
+        has_evo   = bool(getattr(t, 'phone_number_id', None))
+        evo_badge = "badge-blue" if has_evo else "badge-gray"
+        evo_label = f"📱 {t.phone_number_id}" if has_evo else "📱 Sem WA"
 
         rows += f"""
         <div class="tenant-row">
             <div class="tenant-icon">{icon}</div>
-            <div style="flex:1">
+            <div style="flex:1;min-width:120px">
                 <div class="tenant-name">{t.display_name or t.name}</div>
-                <div style="font-size:12px;color:#9aa0b8;margin-top:2px">{count} agendamentos · {clientes} clientes</div>
+                <div style="font-size:12px;color:#9aa0b8;margin-top:2px">{count} agendamentos · {clientes} clientes · {t.billing_email or 'sem email'}</div>
             </div>
             <span class="tenant-type">{tipo}</span>
             <span class="badge {plan_badge}">{plan_label}</span>
             <span class="badge {setup_badge}">{setup_label}</span>
             <span class="badge {bot_status}">{bot_label}</span>
             <span class="badge {evo_badge}" style="font-size:10px">{evo_label}</span>
-            <a href="{dash_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Painel</a>
+            <a href="{dash_url}" target="_blank" class="btn btn-outline btn-sm">🔗</a>
             <a href="/admin/tenant/{t.id}" class="btn btn-outline btn-sm">⚙️ Config</a>
             <form method="POST" action="/admin/tenant/{t.id}/delete" onsubmit="return confirm('⚠️ DELETAR {t.display_name or t.name}?\\n\\nApaga TODOS os dados. Sem volta!')">
                 <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
@@ -240,9 +253,11 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
     )
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Admin — Painel</title>{ADMIN_STYLE}</head><body>
-<div class="header"><div class="logo">⚙️ Admin Panel</div>
-<a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a></div>
+<title>Admin — BotGen</title>{ADMIN_STYLE}</head><body>
+<div class="header">
+    <div class="logo">⚡ BotGen Admin</div>
+    <a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a>
+</div>
 <div class="container">
 {alert}
 <div class="card">
@@ -283,7 +298,7 @@ def admin_home(request: Request, db: Session = Depends(get_db)):
         <select name="plan">
             {''.join(f'<option value="{k}">{v}</option>' for k,v in PLANS.items())}
         </select></div>
-        <div class="form-group"><label>Email do comprador (Kiwify)</label>
+        <div class="form-group"><label>Email do comprador</label>
         <input name="billing_email" placeholder="email@cliente.com" type="email"></div>
     </div>
     <div class="form-group"><label>WhatsApp do dono</label>
@@ -342,6 +357,7 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
     raw_pw = form.get("dashboard_password", "").strip()
     if not name or not raw_pw: return RedirectResponse("/admin?error=campos", status_code=302)
     hashed = bcrypt.hashpw(raw_pw.encode(), bcrypt.gensalt()).decode()
+    setup_token = secrets.token_urlsafe(32)
     tenant = Tenant(
         name=name, display_name=name,
         business_type=form.get("business_type", "petshop"),
@@ -360,11 +376,11 @@ async def create_tenant(request: Request, db: Session = Depends(get_db)):
         plan=form.get("plan", "basico"),
         plan_active=True,
         billing_email=form.get("billing_email") or None,
-        setup_token=secrets.token_urlsafe(32),
+        setup_token=setup_token,
         setup_done=False,
         dashboard_password=hashed,
         dashboard_token=secrets.token_urlsafe(32),
-        bot_active=False,  # inativo até onboarding
+        bot_active=False,
     )
     db.add(tenant)
     db.flush()
@@ -387,6 +403,24 @@ def delete_tenant(tenant_id: str, request: Request, db: Session = Depends(get_db
     db.delete(tenant)
     db.commit()
     return RedirectResponse("/admin?deleted=1", status_code=302)
+
+
+# ── Regenerar setup token ─────────────────────────────────────────────────────
+
+@router.post("/admin/tenant/{tenant_id}/resend-setup")
+async def resend_setup(tenant_id: str, request: Request, db: Session = Depends(get_db)):
+    """
+    Gera um novo setup_token para o tenant.
+    Usado quando o cliente fechou o wizard sem concluir.
+    O novo link é exibido no admin para ser reenviado manualmente.
+    """
+    if not check_admin(request): return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
+    t.setup_token = secrets.token_urlsafe(32)
+    t.setup_done  = False
+    db.commit()
+    return RedirectResponse(f"/admin/tenant/{tenant_id}?setup_resent=1", status_code=302)
 
 
 def _default_services(business_type, tenant_id):
@@ -414,11 +448,13 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     services = db.query(Service).filter(Service.tenant_id == tenant_id).order_by(Service.active.desc(), Service.name).all()
     blocked  = db.query(BlockedSlot).filter(BlockedSlot.tenant_id == tenant_id).order_by(BlockedSlot.date, BlockedSlot.time).all()
 
-    created = request.query_params.get("created") == "1"
-    saved   = request.query_params.get("saved") == "1"
-    alert   = ""
-    if created: alert = '<div class="alert alert-success">✅ Cliente criado com sucesso!</div>'
-    if saved:   alert = '<div class="alert alert-success">✅ Salvo com sucesso!</div>'
+    created      = request.query_params.get("created") == "1"
+    saved        = request.query_params.get("saved") == "1"
+    setup_resent = request.query_params.get("setup_resent") == "1"
+    alert = ""
+    if created:      alert = '<div class="alert alert-success">✅ Cliente criado com sucesso!</div>'
+    if saved:        alert = '<div class="alert alert-success">✅ Salvo com sucesso!</div>'
+    if setup_resent: alert = '<div class="alert alert-warn">🔄 Novo link de setup gerado! Copie e envie para o cliente.</div>'
 
     base_url      = get_base_url(request)
     dashboard_url = f"{base_url}/dashboard?tid={tenant_id}"
@@ -432,6 +468,11 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         Appointment.tenant_id == tenant_id,
         Appointment.status.in_(["confirmed","in_progress"])
     ).count()
+
+    # Setup token
+    setup_token = getattr(tenant, 'setup_token', None) or ""
+    setup_done  = getattr(tenant, 'setup_done', False)
+    setup_url   = f"{base_url}/setup?token={setup_token}" if setup_token else ""
 
     # Serviços
     svc_rows = ""
@@ -469,13 +510,10 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     current_address_label = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
     current_plan          = getattr(tenant, 'plan', 'basico') or 'basico'
     plan_active           = getattr(tenant, 'plan_active', True)
-    setup_done            = getattr(tenant, 'setup_done', False)
     billing_email_val     = getattr(tenant, 'billing_email', '') or ''
-
-    # Evolution por tenant
-    current_evo_url = getattr(tenant, 'evolution_url', '') or ''
-    current_evo_key = getattr(tenant, 'evolution_key', '') or ''
-    current_instance = tenant.phone_number_id or ''
+    current_evo_url       = getattr(tenant, 'evolution_url', '') or ''
+    current_evo_key       = getattr(tenant, 'evolution_key', '') or ''
+    current_instance      = tenant.phone_number_id or ''
 
     # Onboarding checklist
     has_instance  = bool(tenant.phone_number_id)
@@ -484,8 +522,8 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     onboard_steps = [
         (has_instance,  "WhatsApp conectado (instância Evolution configurada)"),
         (has_services,  "Serviços cadastrados"),
-        (has_owner_ph,  "Número do dono configurado (para receber notificações)"),
-        (setup_done,    "Setup/onboarding concluído"),
+        (has_owner_ph,  "Número do dono configurado"),
+        (setup_done,    "Setup/onboarding concluído pelo cliente"),
         (getattr(tenant,'bot_active',False), "Bot ativo"),
     ]
     onboard_html = ""
@@ -494,14 +532,36 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
         color = "#68d391" if ok else "#9aa0b8"
         onboard_html += f'<div class="onboarding-step"><span>{icon}</span><span style="color:{color}">{label}</span></div>'
 
-    # Horários bloqueados
+    # Setup box
+    if setup_done:
+        setup_box_html = '<div style="background:#1a2e1a;border:1px solid rgba(104,211,145,.2);border-radius:10px;padding:12px 16px;font-size:13px;color:#68d391">✅ Setup concluído pelo cliente.</div>'
+    elif setup_url:
+        setup_box_html = f"""<div class="setup-box">
+            <div style="font-size:12px;color:#9aa0b8;margin-bottom:8px">🔗 Link de setup — envie para o cliente:</div>
+            <div class="link-url" id="setup-url-val">{setup_url}</div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+                <button onclick="navigator.clipboard.writeText('{setup_url}');this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar',2000)" class="btn btn-outline btn-sm">📋 Copiar</button>
+                <a href="{setup_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Abrir</a>
+                <form method="POST" action="/admin/tenant/{tenant_id}/resend-setup" style="display:inline">
+                    <button type="submit" class="btn btn-warn btn-sm" onclick="return confirm('Gerar novo link? O link anterior vai parar de funcionar.')">🔄 Novo link</button>
+                </form>
+            </div>
+            <div style="font-size:11px;color:#9aa0b8;margin-top:8px">⚠️ O cliente pode abrir este link quantas vezes precisar até concluir o setup.</div>
+        </div>"""
+    else:
+        setup_box_html = f"""<div class="alert alert-warn">
+            ⚠️ Sem token de setup. <form method="POST" action="/admin/tenant/{tenant_id}/resend-setup" style="display:inline">
+            <button type="submit" class="btn btn-warn btn-sm">Gerar link de setup</button></form>
+        </div>"""
+
+    # Bloqueios
     blocked_rows = ""
     for b in blocked:
         time_label   = b.time if b.time else "Dia inteiro"
-        reason_label = f'<span class="blocked-reason">{b.reason}</span>' if b.reason else ""
-        blocked_rows += f"""<div class="blocked-row">
-            <div class="blocked-date">{b.date}</div>
-            <div class="blocked-time">{time_label}</div>
+        reason_label = f'<span style="font-size:12px;color:#7c7de8">{b.reason}</span>' if b.reason else ""
+        blocked_rows += f"""<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #2d3148;border-radius:10px;margin-bottom:8px;background:#0f1117">
+            <div style="font-weight:700;font-size:13px;min-width:90px">{b.date}</div>
+            <div style="font-size:12px;color:#9aa0b8;flex:1">{time_label}</div>
             {reason_label}
             <form method="POST" action="/admin/tenant/{tenant_id}/blocked/{b.id}/delete" style="margin-left:auto">
                 <button type="submit" class="btn btn-danger btn-sm">✕</button>
@@ -520,8 +580,10 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>Admin — {tenant.display_name or tenant.name}</title>{ADMIN_STYLE}</head><body>
-<div class="header"><div class="logo">⚙️ Admin Panel</div>
-<a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a></div>
+<div class="header">
+    <div class="logo">⚡ BotGen Admin</div>
+    <a href="/admin/logout" class="btn btn-outline btn-sm">Sair</a>
+</div>
 <div class="container">
 <a href="/admin" class="back">← Voltar</a>
 {alert}
@@ -532,28 +594,29 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     <div class="stat-mini"><div class="stat-mini-num">{active_appts}</div><div class="stat-mini-label">Em aberto</div></div>
 </div>
 
-<!-- Onboarding checklist -->
+<!-- Onboarding -->
 <div class="card">
-    <div class="card-title">🚀 Onboarding do cliente <span class="tag">{tipo}</span></div>
+    <div class="card-title">🚀 Onboarding — {tenant.display_name or tenant.name} <span class="tag">{tipo}</span></div>
     <div class="onboarding-checklist">{onboard_html}</div>
-    <div style="font-size:12px;color:#9aa0b8;line-height:1.7">
+    <div style="font-size:12px;color:#9aa0b8;line-height:1.8;margin-bottom:16px">
         <strong style="color:#e8eaf2">Checklist de ativação:</strong><br>
         1. Cliente compra → aparece aqui automaticamente (bot pausado)<br>
-        2. Você liga para o cliente e faz uma chamada de 15 min<br>
-        3. No painel da Evolution (<a href="#evo-config" style="color:#7c7de8">configurar abaixo</a>), cria a instância e escaneia o QR Code<br>
+        2. Você liga para o cliente e marca a chamada de 15 min<br>
+        3. Na Evolution (<a href="#evo-config" style="color:#7c7de8">config abaixo</a>), cria instância e escaneia QR Code<br>
         4. Preenche a instância no campo "WhatsApp" abaixo e salva<br>
         5. Ativa o bot no toggle abaixo → cliente está no ar! 🎉
     </div>
+    {setup_box_html}
 </div>
 
-<!-- Link do painel -->
+<!-- Acesso -->
 <div class="card">
     <div class="card-title">🔗 Acesso do cliente</div>
     <div class="link-box">
-        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel — envie para o cliente após onboarding</div>
+        <div style="font-size:12px;color:#9aa0b8;margin-bottom:6px">Link do painel — envie após ativação</div>
         <div class="link-url" id="dash-url">{dashboard_url}</div>
     </div>
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="navigator.clipboard.writeText(document.getElementById('dash-url').textContent);this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar link',2000)" class="btn btn-outline btn-sm">📋 Copiar link</button>
         <a href="{dashboard_url}" target="_blank" class="btn btn-outline btn-sm">🔗 Abrir painel</a>
     </div>
@@ -571,29 +634,29 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
             </div>
         </div>
         <div>
-            <div style="font-size:11px;color:#9aa0b8;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Onboarding</div>
-            <span class="badge {'badge-green' if setup_done else 'badge-gray'}">{'✅ Concluído' if setup_done else '⚠️ Pendente'}</span>
+            <div style="font-size:11px;color:#9aa0b8;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Setup</div>
+            <span class="badge {'badge-green' if setup_done else 'badge-warn'}">{'✅ Concluído' if setup_done else '⚠️ Pendente'}</span>
         </div>
     </div>
-    <form method="POST" action="/admin/tenant/{tenant_id}/plan" style="display:flex;gap:8px;align-items:flex-end">
-        <div style="flex:1">
+    <form method="POST" action="/admin/tenant/{tenant_id}/plan" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:140px">
             <label>Alterar plano</label>
             <select name="plan">
                 {''.join(f'<option value="{k}" {"selected" if k==current_plan else ""}>{v}</option>' for k,v in PLANS.items())}
             </select>
         </div>
-        <div style="flex:1">
+        <div style="flex:1;min-width:180px">
             <label>Email Kiwify</label>
             <input name="billing_email" type="email" value="{billing_email_val}" placeholder="email@cliente.com">
         </div>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button type="submit" name="action" value="save" class="btn btn-primary">Salvar</button>
-            <button type="submit" name="action" value="suspend" class="btn btn-danger btn-sm" onclick="return confirm('Suspender assinatura?')" style="white-space:nowrap">{'▶ Reativar' if not plan_active else '⏸ Suspender'}</button>
+            <button type="submit" name="action" value="suspend" class="btn btn-danger btn-sm" onclick="return confirm('Confirmar?')" style="white-space:nowrap">{'▶ Reativar' if not plan_active else '⏸ Suspender'}</button>
         </div>
     </form>
 </div>
 
-<!-- Configurações do negócio -->
+<!-- Config -->
 <div class="card">
     <div class="card-title">🏢 Configurações do negócio</div>
     <form method="POST" action="/admin/tenant/{tenant_id}/config">
@@ -623,32 +686,26 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
 
     <div class="divider"></div>
     <div class="section-title" id="evo-config">📱 WhatsApp — Evolution API</div>
-
     <div class="alert alert-info" style="margin-bottom:14px">
-        💡 <strong>Como conectar:</strong> Acesse o painel da sua Evolution API, crie uma instância com o nome do cliente,
+        💡 <strong>Como conectar:</strong> Acesse o painel da Evolution, crie uma instância com o nome do cliente,
         escaneie o QR Code com o WhatsApp Business dele, aguarde "Connected" e preencha abaixo.
     </div>
-
     <div class="form-group">
         <label>Nome da instância *</label>
         <input name="phone_number_id" value="{current_instance}" placeholder="Ex: barbearia-joao">
         <div style="font-size:11px;color:#9aa0b8;margin-top:4px">
-            Exatamente como foi criado na Evolution (sem espaços).
-            Após preencher, configure o webhook na Evolution apontando para:<br>
-            <code style="color:#a29bfe">{webhook_url}</code> — evento: <code style="color:#a29bfe">MESSAGES_UPSERT</code>
+            Exatamente como foi criado na Evolution (sem espaços).<br>
+            Webhook: <code style="color:#a29bfe">{webhook_url}</code> — evento: <code style="color:#a29bfe">MESSAGES_UPSERT</code>
         </div>
     </div>
-
     <div class="grid2">
         <div class="form-group">
-            <label>URL Evolution (opcional — só se diferente do padrão)</label>
+            <label>URL Evolution (opcional)</label>
             <input name="evolution_url" value="{current_evo_url}" placeholder="https://evolution-2.seudominio.com">
-            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Deixe vazio para usar o servidor Evolution padrão</div>
         </div>
         <div class="form-group">
-            <label>API Key Evolution (opcional — só se diferente do padrão)</label>
-            <input name="evolution_key" value="{current_evo_key}" placeholder="Deixe vazio para usar a chave padrão">
-            <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Deixe vazio para usar a chave Evolution padrão</div>
+            <label>API Key Evolution (opcional)</label>
+            <input name="evolution_key" value="{current_evo_key}" placeholder="Deixe vazio para usar a padrão">
         </div>
     </div>
 
@@ -706,8 +763,8 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     <div class="card-title">🔑 Senha do dashboard</div>
     <form method="POST" action="/admin/tenant/{tenant_id}/password">
     <div style="display:flex;gap:12px;align-items:flex-end">
-        <div class="form-group" style="flex:1;margin:0"><label>Nova senha</label>
-        <input name="password" type="password" placeholder="Nova senha para o cliente" required></div>
+        <div class="form-group" style="flex:1;margin:0"><label>Nova senha para o cliente</label>
+        <input name="password" type="password" placeholder="Nova senha" required></div>
         <button type="submit" class="btn btn-primary">Salvar</button>
     </div>
     </form>
@@ -738,10 +795,10 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
     </form>
 </div>
 
-<!-- Bloqueio de horários -->
+<!-- Bloqueios -->
 <div class="card">
     <div class="card-title">🚫 Bloquear horários</div>
-    <div style="font-size:12px;color:#9aa0b8;margin-bottom:14px">Bloqueie dias ou horários específicos. O bot não vai agendar nesses períodos.</div>
+    <div style="font-size:12px;color:#9aa0b8;margin-bottom:14px">O bot não vai agendar nesses períodos.</div>
     {blocked_rows}
     <div class="divider"></div>
     <div class="section-title">Adicionar bloqueio</div>
@@ -761,7 +818,7 @@ def tenant_config(tenant_id: str, request: Request, db: Session = Depends(get_db
 <!-- Zona de perigo -->
 <div class="danger-zone">
     <div class="danger-title">⚠️ Zona de Perigo</div>
-    <p style="font-size:13px;color:#9aa0b8;margin-bottom:14px">Deletar remove permanentemente todos os dados. Sem volta.</p>
+    <p style="font-size:13px;color:#9aa0b8;margin-bottom:14px">Deleta permanentemente todos os dados deste cliente. Sem volta.</p>
     <form method="POST" action="/admin/tenant/{tenant_id}/delete"
           onsubmit="return confirm('⚠️ DELETAR {tenant.display_name or tenant.name}?\\n\\nTodos os dados apagados. Sem volta!')">
         <button type="submit" class="btn btn-danger">🗑️ Deletar este cliente permanentemente</button>
@@ -779,7 +836,6 @@ function selectIcon(el, suffix) {{
 function updateIcons(bizType, suffix) {{
     const icons = ICON_SUGGESTIONS[bizType] || ICON_SUGGESTIONS['outro'];
     const container = document.getElementById('icons-' + suffix);
-    if (!container) return;
     container.innerHTML = icons.map((ic, i) =>
         `<div class="icon-opt ${{i===0?'selected':''}}" data-icon="${{ic}}" onclick="selectIcon(this,'${{suffix}}')">${{ic}}</div>`
     ).join('');
@@ -806,7 +862,9 @@ async def save_config(tenant_id: str, request: Request, db: Session = Depends(ge
     t    = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not t: return JSONResponse({"error": "Não encontrado"}, status_code=404)
 
-    t.display_name         = form.get("display_name", t.display_name)
+    display_name = form.get("display_name", t.display_name)
+    t.display_name         = display_name
+    t.bot_business_name    = display_name  # FIX: sincronizar bot_business_name
     t.business_type        = form.get("business_type", t.business_type)
     t.tenant_icon          = form.get("tenant_icon", getattr(t, 'tenant_icon', '🐾'))
     t.subject_label        = form.get("subject_label", t.subject_label)
@@ -821,15 +879,13 @@ async def save_config(tenant_id: str, request: Request, db: Session = Depends(ge
     t.needs_address        = form.get("needs_address") == "1"
     t.address_label        = form.get("address_label") or getattr(t, 'address_label', 'Endereço de busca')
 
-    # WhatsApp / Evolution
     if form.get("phone_number_id"):
         t.phone_number_id = form.get("phone_number_id")
     t.evolution_url = form.get("evolution_url") or None
     t.evolution_key = form.get("evolution_key") or None
 
-    # Marca setup como concluído se WhatsApp foi configurado
-    if t.phone_number_id and not t.setup_done:
-        t.setup_done = True
+    # FIX: setup_done NÃO é marcado aqui — só quando o cliente conclui o wizard em /setup
+    # O admin configurar a instância não significa que o cliente fez o onboarding
 
     db.commit()
     return RedirectResponse(f"/admin/tenant/{tenant_id}?saved=1", status_code=302)
