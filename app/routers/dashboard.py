@@ -31,22 +31,20 @@ PAYMENT_LABELS = {
 BUSINESS_NO_SUBJECT = {"barbearia", "salao", "estetica", "outro"}
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
+CHECKOUT_LINKS = {
+    "basico":  "https://pay.kiwify.com.br/ypIXFRM",
+    "pro":     "https://pay.kiwify.com.br/pndpF39",
+    "agencia": "https://pay.kiwify.com.br/O0oUFkt",
+}
+
 
 # ── Plan feature check ────────────────────────────────────────────────────────
 
 def _check_plan_feature(tenant, feature: str) -> bool:
-    """
-    Verifica se o plano do tenant permite uma feature.
-    basico  → sem CSV, sem lembretes, até 7 serviços
-    pro     → tudo liberado, 1 tenant
-    agencia → tudo liberado, até 3 tenants
-    """
     plano       = getattr(tenant, 'plan', 'basico') or 'basico'
     plan_active = getattr(tenant, 'plan_active', True)
-
     if not plan_active:
         return False
-
     if feature == "csv":
         return plano in ("pro", "agencia")
     if feature == "lembretes":
@@ -56,9 +54,9 @@ def _check_plan_feature(tenant, feature: str) -> bool:
     return True
 
 
-# ── Helpers de performance ────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _load_customers_map(db: Session, tenant_id: str, customer_ids: list) -> dict:
+def _load_customers_map(db, tenant_id, customer_ids):
     if not customer_ids:
         return {}
     rows = db.query(Customer).filter(
@@ -68,7 +66,7 @@ def _load_customers_map(db: Session, tenant_id: str, customer_ids: list) -> dict
     return {c.id: c for c in rows}
 
 
-def _load_services_map(db: Session, tenant_id: str, service_ids: list) -> dict:
+def _load_services_map(db, tenant_id, service_ids):
     if not service_ids:
         return {}
     rows = db.query(Service).filter(
@@ -78,7 +76,7 @@ def _load_services_map(db: Session, tenant_id: str, service_ids: list) -> dict:
     return {s.id: s for s in rows}
 
 
-def _price_fmt(service) -> str:
+def _price_fmt(service):
     if service and service.price:
         return f"R$ {service.price/100:.2f}"
     return ""
@@ -86,7 +84,7 @@ def _price_fmt(service) -> str:
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
-def get_tenant_from_request(request: Request, db: Session) -> Optional[object]:
+def get_tenant_from_request(request, db):
     session_cookie = request.cookies.get("dash_session")
     if not session_cookie or ":" not in session_cookie:
         return None
@@ -97,7 +95,7 @@ def get_tenant_from_request(request: Request, db: Session) -> Optional[object]:
     return tenant
 
 
-def login_page_html(tid: str, icon: str = "🐾", biz_name: str = "Painel", error: str = "") -> str:
+def login_page_html(tid, icon="🐾", biz_name="Painel", error=""):
     err = f'<div class="login-error">{error}</div>' if error else ""
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>Entrar — {biz_name}</title>
@@ -177,8 +175,7 @@ async def update_status(appointment_id: str, request: Request, db: Session = Dep
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     data = await request.json()
     a = db.query(Appointment).filter(
-        Appointment.id == appointment_id,
-        Appointment.tenant_id == tenant.id
+        Appointment.id == appointment_id, Appointment.tenant_id == tenant.id
     ).first()
     if not a:
         return JSONResponse({"error": "Não encontrado"}, status_code=404)
@@ -193,8 +190,7 @@ def cancel_appt(appointment_id: str, request: Request, db: Session = Depends(get
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     a = db.query(Appointment).filter(
-        Appointment.id == appointment_id,
-        Appointment.tenant_id == tenant.id
+        Appointment.id == appointment_id, Appointment.tenant_id == tenant.id
     ).first()
     if not a:
         return JSONResponse({"error": "Não encontrado"}, status_code=404)
@@ -210,18 +206,15 @@ async def update_payment(appointment_id: str, request: Request, db: Session = De
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     data = await request.json()
     a = db.query(Appointment).filter(
-        Appointment.id == appointment_id,
-        Appointment.tenant_id == tenant.id
+        Appointment.id == appointment_id, Appointment.tenant_id == tenant.id
     ).first()
     if not a:
         return JSONResponse({"error": "Não encontrado"}, status_code=404)
     a.payment_status = data.get("payment_status", a.payment_status)
     a.payment_method = data.get("payment_method", a.payment_method)
     if data.get("payment_amount"):
-        try:
-            a.payment_amount = int(float(data["payment_amount"]) * 100)
-        except Exception:
-            pass
+        try: a.payment_amount = int(float(data["payment_amount"]) * 100)
+        except: pass
     a.payment_pix_key = data.get("payment_pix_key", a.payment_pix_key)
     a.payment_notes   = data.get("payment_notes",   a.payment_notes)
     if a.payment_status == "paid" and not a.payment_paid_at:
@@ -250,27 +243,23 @@ async def create_appt(request: Request, db: Session = Depends(get_db)):
             return JSONResponse({"error": "Preencha todos os campos obrigatórios"}, status_code=400)
 
         scheduled_at = datetime.fromisoformat(scheduled_str)
-
         existing = db.query(Appointment).filter(
-            Appointment.tenant_id   == tenant.id,
+            Appointment.tenant_id    == tenant.id,
             Appointment.scheduled_at == scheduled_at,
-            Appointment.status      != "cancelled"
+            Appointment.status       != "cancelled"
         ).first()
         if existing:
             return JSONResponse({"error": "Horário já ocupado"}, status_code=409)
 
         customer = db.query(Customer).filter(
-            Customer.tenant_id == tenant.id,
-            Customer.name      == customer_name
+            Customer.tenant_id == tenant.id, Customer.name == customer_name
         ).first()
         if not customer:
             customer = Customer(tenant_id=tenant.id, name=customer_name, phone="manual")
-            db.add(customer)
-            db.flush()
+            db.add(customer); db.flush()
 
         service = db.query(Service).filter(
-            Service.id        == service_id,
-            Service.tenant_id == tenant.id
+            Service.id == service_id, Service.tenant_id == tenant.id
         ).first()
         if not service:
             return JSONResponse({"error": "Serviço não encontrado"}, status_code=400)
@@ -290,8 +279,7 @@ async def create_appt(request: Request, db: Session = Depends(get_db)):
             pickup_address=data.get("pickup_address") or None,
             status="confirmed", payment_status="pending",
         )
-        db.add(appt)
-        db.commit()
+        db.add(appt); db.commit()
         return {"success": True, "id": str(appt.id)}
     except Exception as e:
         db.rollback()
@@ -317,12 +305,10 @@ def check_avail(date: str, request: Request, tid: str = "", db: Session = Depend
         ).all()
         busy    = [a.scheduled_at.strftime("%H:%M") for a in appts]
         blocked = db.query(BlockedSlot).filter(
-            BlockedSlot.tenant_id == tenant.id,
-            BlockedSlot.date      == date
+            BlockedSlot.tenant_id == tenant.id, BlockedSlot.date == date
         ).all()
         for b in blocked:
-            if b.time:
-                busy.append(b.time)
+            if b.time: busy.append(b.time)
         return {"busy": busy, "day_blocked": any(b.time is None for b in blocked)}
     except Exception:
         return {"busy": []}
@@ -334,8 +320,7 @@ def get_services(request: Request, db: Session = Depends(get_db)):
     if not tenant:
         return {"services": []}
     services = db.query(Service).filter(
-        Service.tenant_id == tenant.id,
-        Service.active    == True
+        Service.tenant_id == tenant.id, Service.active == True
     ).order_by(Service.name).all()
     return {"services": [
         {"id": s.id, "name": s.name, "price": s.price, "duration_min": s.duration_min, "color": s.color}
@@ -350,8 +335,7 @@ async def update_service(service_id: str, request: Request, db: Session = Depend
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     data = await request.json()
     svc  = db.query(Service).filter(
-        Service.id        == service_id,
-        Service.tenant_id == tenant.id
+        Service.id == service_id, Service.tenant_id == tenant.id
     ).first()
     if not svc:
         return JSONResponse({"error": "Não encontrado"}, status_code=404)
@@ -372,34 +356,28 @@ async def create_service(request: Request, db: Session = Depends(get_db)):
     tenant = get_tenant_from_request(request, db)
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
-
-    # ── Limite de 7 serviços no plano básico ──────────────────────────────
     if not _check_plan_feature(tenant, "servicos_ilimitados"):
         count = db.query(Service).filter(
-            Service.tenant_id == tenant.id,
-            Service.active    == True
+            Service.tenant_id == tenant.id, Service.active == True
         ).count()
         if count >= 7:
             return JSONResponse(
-                {"error": "Plano Básico permite até 7 serviços. Faça upgrade para o plano Pro para adicionar mais."},
+                {"error": "Plano Básico permite até 7 serviços. Faça upgrade para o Plano Pro para adicionar mais."},
                 status_code=403
             )
-
     data = await request.json()
     name = (data.get("name") or "").strip()
     if not name:
         return JSONResponse({"error": "Nome obrigatório"}, status_code=400)
     try: price_cents = int(float(data.get("price", 0)) * 100)
     except: price_cents = 0
-
     svc = Service(
         tenant_id=tenant.id, name=name,
         duration_min=int(data.get("duration_min", 60)),
         price=price_cents, description=data.get("description", ""),
         color=data.get("color", "#6C5CE7"), active=True,
     )
-    db.add(svc)
-    db.commit()
+    db.add(svc); db.commit()
     return {"success": True, "id": str(svc.id)}
 
 
@@ -409,16 +387,12 @@ def delete_service_api(service_id: str, request: Request, db: Session = Depends(
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     svc = db.query(Service).filter(
-        Service.id        == service_id,
-        Service.tenant_id == tenant.id
+        Service.id == service_id, Service.tenant_id == tenant.id
     ).first()
     if svc:
-        svc.active = False
-        db.commit()
+        svc.active = False; db.commit()
     return {"success": True}
 
-
-# ── API: Configurações ────────────────────────────────────────────────────────
 
 @router.post("/api/tenant/config")
 async def save_tenant_config(request: Request, db: Session = Depends(get_db)):
@@ -426,7 +400,6 @@ async def save_tenant_config(request: Request, db: Session = Depends(get_db)):
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     data = await request.json()
-
     if "display_name" in data and data["display_name"].strip():
         tenant.display_name      = data["display_name"].strip()
         tenant.bot_business_name = data["display_name"].strip()
@@ -434,17 +407,11 @@ async def save_tenant_config(request: Request, db: Session = Depends(get_db)):
         tenant.bot_attendant_name = data["bot_attendant_name"].strip()
     if "owner_phone" in data:
         tenant.owner_phone = (data["owner_phone"] or "").strip() or None
-    if "open_time" in data:
-        tenant.open_time = data["open_time"] or "09:00"
-    if "close_time" in data:
-        tenant.close_time = data["close_time"] or "18:00"
-    if "open_days" in data:
-        tenant.open_days = data["open_days"] or "0,1,2,3,4,5"
-    if "bot_active" in data:
-        tenant.bot_active = bool(data["bot_active"])
-    if "notify_new_appt" in data:
-        tenant.notify_new_appt = bool(data["notify_new_appt"])
-
+    if "open_time"  in data: tenant.open_time  = data["open_time"]  or "09:00"
+    if "close_time" in data: tenant.close_time = data["close_time"] or "18:00"
+    if "open_days"  in data: tenant.open_days  = data["open_days"]  or "0,1,2,3,4,5"
+    if "bot_active"      in data: tenant.bot_active      = bool(data["bot_active"])
+    if "notify_new_appt" in data: tenant.notify_new_appt = bool(data["notify_new_appt"])
     db.commit()
     return {"success": True}
 
@@ -457,30 +424,24 @@ async def change_password(request: Request, db: Session = Depends(get_db)):
     data       = await request.json()
     current_pw = data.get("current_password", "")
     new_pw     = data.get("new_password", "")
-
     if not bcrypt.checkpw(current_pw.encode(), tenant.dashboard_password.encode()):
         return JSONResponse({"error": "Senha atual incorreta"}, status_code=400)
     if len(new_pw) < 6:
         return JSONResponse({"error": "Nova senha deve ter ao menos 6 caracteres"}, status_code=400)
-
     tenant.dashboard_password = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
     tenant.dashboard_token    = secrets.token_urlsafe(32)
     db.commit()
     return {"success": True, "new_token": tenant.dashboard_token}
 
 
-# ── Exportação CSV ────────────────────────────────────────────────────────────
-
 @router.get("/api/export/relatorio")
 def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_db)):
     tenant = get_tenant_from_request(request, db)
     if not tenant:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
-
-    # ── Bloqueia para plano básico ────────────────────────────────────────
     if not _check_plan_feature(tenant, "csv"):
         return JSONResponse(
-            {"error": "Exportação de relatório disponível apenas nos planos Pro e Agência. Faça upgrade para acessar."},
+            {"error": "Exportação disponível apenas nos planos Pro e Agência."},
             status_code=403
         )
 
@@ -506,20 +467,15 @@ def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_
         Appointment.scheduled_at <= fim_mes,
     ).order_by(Appointment.scheduled_at).all()
 
-    cids = [a.customer_id for a in appts]
-    sids = [a.service_id  for a in appts]
-    cmap = _load_customers_map(db, tenant.id, cids)
-    smap = _load_services_map(db, tenant.id, sids)
+    cmap = _load_customers_map(db, tenant.id, [a.customer_id for a in appts])
+    smap = _load_services_map(db, tenant.id, [a.service_id  for a in appts])
 
     output = io.StringIO()
     writer = csv.writer(output)
-
-    if show_pet:
-        header = ["Data/Hora", "Cliente", "Pet", "Raça", "Peso(kg)", "Serviço", "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca(Horário)"]
-    else:
-        header = ["Data/Hora", "Cliente", "Serviço", "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca(Horário)"]
-    if needs_address:
-        header.append(address_label)
+    header = (["Data/Hora", "Cliente", "Pet", "Raça", "Peso(kg)", "Serviço", "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca"]
+              if show_pet else
+              ["Data/Hora", "Cliente", "Serviço", "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca"])
+    if needs_address: header.append(address_label)
     writer.writerow(header)
 
     for a in appts:
@@ -533,24 +489,19 @@ def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_
         pay_label    = PAYMENT_LABELS.get(a.payment_status or "pending", (a.payment_status or "-", "", ""))[0]
         pay_label    = pay_label.replace("💳","").replace("✅","").replace("🎁","").strip()
 
-        if show_pet:
-            row = [
-                a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
-                a.pet_name or "-", a.pet_breed or "-",
-                a.pet_weight or "-", nome_servico, valor,
-                status_label, pay_label,
-                a.payment_method or "-", a.payment_pix_key or "-",
-                a.pickup_time or "-",
-            ]
-        else:
-            row = [
-                a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
-                nome_servico, valor, status_label, pay_label,
-                a.payment_method or "-", a.payment_pix_key or "-",
-                a.pickup_time or "-",
-            ]
-        if needs_address:
-            row.append(a.pickup_address or "-")
+        row = (
+            [a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
+             a.pet_name or "-", a.pet_breed or "-",
+             a.pet_weight or "-", nome_servico, valor,
+             status_label, pay_label, a.payment_method or "-",
+             a.payment_pix_key or "-", a.pickup_time or "-"]
+            if show_pet else
+            [a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
+             nome_servico, valor, status_label, pay_label,
+             a.payment_method or "-", a.payment_pix_key or "-",
+             a.pickup_time or "-"]
+        )
+        if needs_address: row.append(a.pickup_address or "-")
         writer.writerow(row)
 
     output.seek(0)
@@ -577,7 +528,42 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             return RedirectResponse(f"/dashboard/login?tid={tid}", status_code=302)
         return HTMLResponse("<h2>Acesso negado.</h2>", status_code=401)
 
-    tid            = tenant.id
+    tid = tenant.id
+
+    # ── Plano suspenso — página de reativação ─────────────────────────────────
+    if not getattr(tenant, 'plan_active', True):
+        biz_name_sp = tenant.display_name or tenant.name
+        return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Conta suspensa — {biz_name_sp}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'Inter',sans-serif;background:#0f0f1a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}}
+.box{{max-width:520px;width:100%;background:#1a1a2e;border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:40px 36px;text-align:center}}
+h1{{font-size:22px;font-weight:800;color:#fff;margin:16px 0 10px}}
+p{{font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:20px}}
+.alert{{background:#2d1515;border:1px solid rgba(252,129,129,.2);border-radius:10px;padding:14px 18px;font-size:13px;color:#fc8181;margin-bottom:28px;text-align:left}}
+.plans{{display:flex;flex-direction:column;gap:10px;margin-bottom:24px}}
+a.plan-btn{{display:block;padding:14px 20px;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px;transition:all .2s}}
+.plan-basic{{background:#4c1d95;color:#fff}}.plan-basic:hover{{background:#5b21b6}}
+.plan-pro{{background:#7c3aed;color:#fff}}.plan-pro:hover{{background:#6d28d9}}
+.plan-agency{{background:rgba(124,58,237,0.15);color:#a78bfa;border:1px solid rgba(124,58,237,0.4)}}.plan-agency:hover{{background:rgba(124,58,237,0.25)}}
+.footer{{font-size:12px;color:#475569}}
+</style></head><body>
+<div class="box">
+  <div style="font-size:48px">⚠️</div>
+  <h1>Conta suspensa</h1>
+  <p>O bot do <strong style="color:#fff">{biz_name_sp}</strong> está pausado porque a assinatura foi cancelada ou houve uma falha no pagamento.</p>
+  <div class="alert">✅ Seus dados estão preservados. Reative para voltar a receber agendamentos automaticamente.</div>
+  <div class="plans">
+    <a href="{CHECKOUT_LINKS['basico']}" class="plan-btn plan-basic" target="_blank">⭐ Reativar — Plano Básico R$97,90/mês</a>
+    <a href="{CHECKOUT_LINKS['pro']}" class="plan-btn plan-pro" target="_blank">🚀 Reativar — Plano Pro R$197,90/mês</a>
+    <a href="{CHECKOUT_LINKS['agencia']}" class="plan-btn plan-agency" target="_blank">🏢 Reativar — Plano Agência R$497,90/mês</a>
+  </div>
+  <div class="footer">Dúvidas? Responda o email que você recebeu ou nos chame pelo WhatsApp.</div>
+</div>
+</body></html>""")
+
     tenant_name    = tenant.display_name or tenant.name
     tenant_icon    = getattr(tenant, 'tenant_icon', '🐾') or '🐾'
     biz_type       = getattr(tenant, 'business_type', 'outro') or 'outro'
@@ -587,7 +573,6 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     address_label  = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
     show_pet       = biz_type not in BUSINESS_NO_SUBJECT
 
-    # Plano
     plano           = getattr(tenant, 'plan', 'basico') or 'basico'
     plan_active     = getattr(tenant, 'plan_active', True)
     pode_csv        = _check_plan_feature(tenant, "csv")
@@ -619,9 +604,9 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     ).order_by(Appointment.scheduled_at.desc()).limit(200).all()
 
     pendentes_all = db.query(Appointment).filter(
-        Appointment.tenant_id    == tid,
+        Appointment.tenant_id      == tid,
         Appointment.payment_status == "pending",
-        Appointment.status       != "cancelled"
+        Appointment.status         != "cancelled"
     ).order_by(Appointment.scheduled_at.desc()).all()
 
     services_all = db.query(Service).filter(
@@ -629,10 +614,8 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     ).order_by(Service.active.desc(), Service.name).all()
 
     all_appts = list({a.id: a for a in agendamentos_hoje + proximos + historico + pendentes_all}.values())
-    all_cids  = [a.customer_id for a in all_appts]
-    all_sids  = [a.service_id  for a in all_appts]
-    cmap = _load_customers_map(db, tid, all_cids)
-    smap = _load_services_map(db, tid, all_sids)
+    cmap = _load_customers_map(db, tid, [a.customer_id for a in all_appts])
+    smap = _load_services_map(db, tid, [a.service_id  for a in all_appts])
 
     total_clientes = db.query(Customer).filter(Customer.tenant_id == tid).count()
     em_atendimento = db.query(Appointment).filter(
@@ -677,8 +660,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     top_svc = ""
     if svc_counts:
         top_s = smap.get(svc_counts.most_common(1)[0][0])
-        if top_s:
-            top_svc = top_s.name
+        if top_s: top_svc = top_s.name
 
     has_services    = any(s.active for s in services_all)
     has_appts       = bool(historico)
@@ -690,7 +672,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         steps = [
             ("✅" if has_services else "⬜", "Cadastre seus serviços na aba <strong>Serviços</strong>"),
             ("✅" if wa_configured else "⬜", "WhatsApp configurado pelo admin"),
-            ("✅" if owner_configured else "⬜", "Adicione seu número na aba <strong>Configurações</strong> para receber notificações"),
+            ("✅" if owner_configured else "⬜", "Adicione seu número na aba <strong>Configurações</strong>"),
             ("⬜", "Faça seu primeiro agendamento clicando em <strong>+ Agendar</strong>"),
         ]
         steps_html = "".join(
@@ -700,20 +682,31 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         )
         onboarding_html = f'<div class="card" style="border-color:var(--accent);background:var(--accent-bg)"><div class="section-title" style="color:var(--accent)">🚀 Bem-vindo! Configure sua agenda em 4 passos</div>{steps_html}</div>'
 
-    # Banner de plano básico (CSV bloqueado)
-    plano_banner = ""
+    # ── Banner de upgrade por plano ───────────────────────────────────────────
+    plano_banner     = ""
+    svc_count_banner = sum(1 for s in services_all if s.active)
     if plano == "basico":
-        svc_count  = sum(1 for s in services_all if s.active)
-        svc_aviso  = f" — {svc_count}/7 serviços usados" if True else ""
-        plano_banner = f"""<div style="background:var(--warn-bg);border:1px solid rgba(198,125,0,.3);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--warn);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <span>⭐ <strong>Plano Básico</strong>{svc_aviso} · Sem relatório CSV · Sem lembretes automáticos</span>
-            <span style="font-size:11px;opacity:.7">Faça upgrade para Pro ou Agência para desbloquear</span>
+        svc_aviso    = f"{svc_count_banner}/7 serviços"
+        plano_banner = f"""<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid rgba(124,58,237,0.3);border-radius:14px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+                <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:3px">⭐ Plano Básico · {svc_aviso} · Sem CSV · Sem lembretes</div>
+                <div style="font-size:12px;color:#94a3b8">Faça upgrade e desbloqueie relatórios, lembretes automáticos e serviços ilimitados</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <a href="{CHECKOUT_LINKS['pro']}" target="_blank" style="background:#7c3aed;color:#fff;text-decoration:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;white-space:nowrap">🚀 Upgrade Pro — R$197,90</a>
+                <a href="{CHECKOUT_LINKS['agencia']}" target="_blank" style="background:rgba(124,58,237,0.15);color:#a78bfa;text-decoration:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;border:1px solid rgba(124,58,237,0.3);white-space:nowrap">🏢 Agência — R$497,90</a>
+            </div>
+        </div>"""
+    elif plano == "pro":
+        plano_banner = f"""<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid rgba(124,58,237,0.3);border-radius:14px;padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div style="font-size:13px;color:#94a3b8">🚀 <strong style="color:#a78bfa">Plano Pro</strong> · Tem mais de um negócio? O Plano Agência inclui até 3 negócios no mesmo plano.</div>
+            <a href="{CHECKOUT_LINKS['agencia']}" target="_blank" style="background:rgba(124,58,237,0.15);color:#a78bfa;text-decoration:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;border:1px solid rgba(124,58,237,0.3);white-space:nowrap">🏢 Ver Plano Agência</a>
         </div>"""
 
     def _pay_btn(a):
-        svc       = smap.get(a.service_id)
+        svc      = smap.get(a.service_id)
         price_val = (svc.price / 100) if svc and svc.price else 0
-        ps        = getattr(a, 'payment_status', 'pending') or 'pending'
+        ps       = getattr(a, 'payment_status', 'pending') or 'pending'
         pl, pbg, pc = PAYMENT_LABELS.get(ps, ("💳 Pend.", "#fff8e1", "#c67d00"))
         return (
             f'<button class="pay-btn" onclick="openPayModal(\'{a.id}\', {price_val})" '
@@ -788,7 +781,6 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             ps           = getattr(a, 'payment_status', 'pending') or 'pending'
             pl, pbg, pc  = PAYMENT_LABELS.get(ps, ("💳 Pend.", "#fff8e1", "#c67d00"))
             price_val    = (service.price / 100) if service and service.price else 0
-
             row = f"<td>{a.scheduled_at.strftime('%d/%m %H:%M')}</td><td>{nome_cliente}</td>"
             if show_pet:
                 row += f"<td>{a.pet_name or '-'}</td><td>{a.pet_breed or '-'}/{f'{a.pet_weight}kg' if a.pet_weight else '-'}</td>"
@@ -797,8 +789,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
                 row += f"<td style='font-size:11px;color:var(--success)'>{getattr(a,'pickup_address',None) or '-'}</td>"
             row += (
                 f"<td><span class='badge' style='background:{bg};color:{color}'>{label}</span></td>"
-                f"<td><span class='badge' style='background:{pbg};color:{pc};cursor:pointer' "
-                f"onclick=\"openPayModal('{a.id}',{price_val})\">{pl}</span></td>"
+                f"<td><span class='badge' style='background:{pbg};color:{pc};cursor:pointer' onclick=\"openPayModal('{a.id}',{price_val})\">{pl}</span></td>"
                 f"<td><button class='btn-cancel-small' onclick=\"cancelAppt('{a.id}')\">✕</button></td>"
             )
             rows_proximos += f"<tr>{row}</tr>"
@@ -831,7 +822,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
                 <td>{criado}</td>
             </tr>"""
 
-    # ── Pagamentos pendentes ──────────────────────────────────────────────────
+    # ── Pendentes ─────────────────────────────────────────────────────────────
     rows_pendentes = ""
     if not pendentes_all:
         rows_pendentes = '<tr><td colspan="7" class="empty-row">🎉 Nenhum pagamento pendente!</td></tr>'
@@ -853,7 +844,6 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
                 <td><span class="badge" style="background:{sbg};color:{sc}">{sl}</span></td>
                 <td><button class="btn-pay-now" onclick="openPayModal('{a.id}',{price_val})">💳 Registrar</button></td>
             </tr>"""
-
     pend_th_pet = f"<th>{subject}</th>" if show_pet else ""
 
     # ── Serviços ──────────────────────────────────────────────────────────────
@@ -861,7 +851,7 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     svc_limite_html  = ""
     if not pode_svc_ilimit:
         cor = "#fc8181" if svc_count_active >= 7 else "#9aa0b8"
-        svc_limite_html = f'<div style="font-size:12px;color:{cor};margin-bottom:12px">Plano Básico: {svc_count_active}/7 serviços ativos. {"⚠️ Limite atingido." if svc_count_active >= 7 else ""}</div>'
+        svc_limite_html = f'<div style="font-size:12px;color:{cor};margin-bottom:12px">Plano Básico: {svc_count_active}/7 serviços. {"⚠️ Limite atingido." if svc_count_active >= 7 else ""}</div>'
 
     svc_rows = ""
     for s in services_all:
@@ -875,16 +865,12 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             </div>
             {active_badge}
             <div style="display:flex;gap:8px;align-items:center">
-                <div>
-                    <div style="font-size:10px;color:var(--text3);margin-bottom:2px">PREÇO</div>
-                    <input class="svc-input" id="price-{s.id}" value="{s.price/100:.2f}" type="number" step="0.01" style="width:90px">
-                </div>
-                <div>
-                    <div style="font-size:10px;color:var(--text3);margin-bottom:2px">MIN</div>
-                    <input class="svc-input" id="dur-{s.id}" value="{s.duration_min}" type="number" style="width:65px">
-                </div>
+                <div><div style="font-size:10px;color:var(--text3);margin-bottom:2px">PREÇO</div>
+                <input class="svc-input" id="price-{s.id}" value="{s.price/100:.2f}" type="number" step="0.01" style="width:90px"></div>
+                <div><div style="font-size:10px;color:var(--text3);margin-bottom:2px">MIN</div>
+                <input class="svc-input" id="dur-{s.id}" value="{s.duration_min}" type="number" style="width:65px"></div>
                 <button class="btn-save-svc" onclick="saveService('{s.id}')">💾</button>
-                <button class="btn-del-svc" onclick="deleteService('{s.id}')">✕</button>
+                <button class="btn-del-svc"  onclick="deleteService('{s.id}')">✕</button>
             </div>
         </div>"""
 
@@ -893,11 +879,15 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
         for s in services_all if s.active
     )
 
-    # Add service form — esconde se limite atingido no básico
     add_svc_bloqueado = (not pode_svc_ilimit and svc_count_active >= 7)
-    add_svc_form = ""
     if add_svc_bloqueado:
-        add_svc_form = '<div class="alert-info" style="background:var(--warn-bg);color:var(--warn);border:1px solid rgba(198,125,0,.3);padding:12px 16px;border-radius:8px;font-size:13px;margin-top:14px">⚠️ Limite de 7 serviços do Plano Básico atingido. Faça upgrade para o Plano Pro para adicionar mais.</div>'
+        add_svc_form = f"""<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid rgba(124,58,237,0.3);border-radius:12px;padding:16px 20px;margin-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+                <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:3px">⚠️ Limite de 7 serviços atingido</div>
+                <div style="font-size:12px;color:#94a3b8">Faça upgrade para o Plano Pro e tenha serviços ilimitados</div>
+            </div>
+            <a href="{CHECKOUT_LINKS['pro']}" target="_blank" style="background:#7c3aed;color:#fff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;white-space:nowrap">🚀 Upgrade Pro</a>
+        </div>"""
     else:
         add_svc_form = f"""
         <div class="add-svc-form">
@@ -914,11 +904,10 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             </div>
         </div>"""
 
-    # ── Aba Configurações ─────────────────────────────────────────────────────
+    # ── Config ────────────────────────────────────────────────────────────────
     open_days_list     = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
     days_btns          = ''.join(
-        f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" '
-        f'data-day="{i}" onclick="toggleConfigDay(this)">{d}</button>'
+        f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" data-day="{i}" onclick="toggleConfigDay(this)">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
     bot_active_checked  = 'checked' if getattr(tenant, 'bot_active', True) else ''
@@ -932,13 +921,51 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
 
     lembretes_info = ""
     if not pode_lembretes:
-        lembretes_info = '<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠️ Lembretes automáticos disponíveis apenas nos planos Pro e Agência.</div>'
+        lembretes_info = f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;padding:8px 12px;background:rgba(124,58,237,0.08);border-radius:8px;border-left:3px solid rgba(124,58,237,0.4)">⚠️ Lembretes automáticos disponíveis nos planos Pro e Agência. <a href="{CHECKOUT_LINKS["pro"]}" target="_blank" style="color:#a78bfa;font-weight:700">Fazer upgrade →</a></div>'
 
     csv_info = ""
     if not pode_csv:
-        csv_info = '<div style="font-size:11px;color:var(--warn);margin-top:6px">⚠️ Exportação CSV disponível apenas nos planos Pro e Agência.</div>'
+        csv_info = f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;padding:8px 12px;background:rgba(124,58,237,0.08);border-radius:8px;border-left:3px solid rgba(124,58,237,0.4)">⚠️ Exportação CSV disponível nos planos Pro e Agência. <a href="{CHECKOUT_LINKS["pro"]}" target="_blank" style="color:#a78bfa;font-weight:700">Fazer upgrade →</a></div>'
 
-    # ── Slots para o modal ────────────────────────────────────────────────────
+    # Cards de upgrade na config
+    upgrade_cards_html = ""
+    if plano == "basico":
+        upgrade_cards_html = f"""
+        <div style="display:flex;flex-direction:column;gap:10px;margin:12px 0 4px">
+            <div style="border:2px solid #7c3aed;border-radius:12px;padding:16px;background:rgba(124,58,237,0.08)">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+                    <div>
+                        <div style="font-weight:700;color:#a78bfa;font-size:14px">🚀 Plano Pro — R$197,90/mês</div>
+                        <div style="font-size:12px;color:var(--text3);margin-top:4px">Serviços ilimitados · Lembretes automáticos · CSV · Relatório semanal</div>
+                    </div>
+                    <a href="{CHECKOUT_LINKS['pro']}" target="_blank" style="background:#7c3aed;color:#fff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;white-space:nowrap">Fazer upgrade →</a>
+                </div>
+            </div>
+            <div style="border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--surface2)">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+                    <div>
+                        <div style="font-weight:700;color:var(--text);font-size:14px">🏢 Plano Agência — R$497,90/mês</div>
+                        <div style="font-size:12px;color:var(--text3);margin-top:4px">Tudo do Pro · Até 3 negócios · Suporte prioritário</div>
+                    </div>
+                    <a href="{CHECKOUT_LINKS['agencia']}" target="_blank" style="background:var(--surface);color:var(--accent);text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;border:1px solid var(--border);white-space:nowrap">Ver Agência →</a>
+                </div>
+            </div>
+        </div>"""
+    elif plano == "pro":
+        upgrade_cards_html = f"""
+        <div style="border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--surface2);margin:12px 0 4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+                <div>
+                    <div style="font-weight:700;color:var(--text);font-size:14px">🏢 Plano Agência — R$497,90/mês</div>
+                    <div style="font-size:12px;color:var(--text3);margin-top:4px">Tudo do Pro · Até 3 negócios no mesmo plano · Suporte prioritário</div>
+                </div>
+                <a href="{CHECKOUT_LINKS['agencia']}" target="_blank" style="background:var(--surface);color:var(--accent);text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;border:1px solid var(--border);white-space:nowrap">Ver Agência →</a>
+            </div>
+        </div>"""
+    else:
+        upgrade_cards_html = '<div style="font-size:13px;color:var(--text3);padding:10px 0">🏢 Você está no plano Agência — o plano mais completo disponível.</div>'
+
+    # Slots
     open_time  = getattr(tenant, 'open_time', '09:00') or '09:00'
     close_time = getattr(tenant, 'close_time', '18:00') or '18:00'
     try:
@@ -958,7 +985,6 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
     mes_atual  = hoje.strftime("%Y-%m")
     mes_label  = hoje.strftime("%B/%Y").capitalize()
 
-    # Campo endereço no modal
     address_modal_field = ""
     if needs_address:
         address_modal_field = f"""
@@ -967,28 +993,15 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             <input type="text" id="f_address" placeholder="Ex: Rua das Flores, 123 — Centro">
         </div>"""
 
-    # Campos pet no modal
     if show_pet:
         pet_modal_fields = f"""
         <div class="form-row">
-            <div class="form-group">
-                <label>{tenant_icon} {subject} *</label>
-                <input type="text" id="f_pet" placeholder="Ex: Rex">
-            </div>
-            <div class="form-group">
-                <label>✂️ Serviço *</label>
-                <select id="f_service">{service_options}</select>
-            </div>
+            <div class="form-group"><label>{tenant_icon} {subject} *</label><input type="text" id="f_pet" placeholder="Ex: Rex"></div>
+            <div class="form-group"><label>✂️ Serviço *</label><select id="f_service">{service_options}</select></div>
         </div>
         <div class="form-row">
-            <div class="form-group">
-                <label>🦴 Raça</label>
-                <input type="text" id="f_breed" placeholder="Ex: Golden">
-            </div>
-            <div class="form-group">
-                <label>⚖️ Peso (kg)</label>
-                <input type="number" id="f_weight" placeholder="15" step="0.1" min="0">
-            </div>
+            <div class="form-group"><label>🦴 Raça</label><input type="text" id="f_breed" placeholder="Ex: Golden"></div>
+            <div class="form-group"><label>⚖️ Peso (kg)</label><input type="number" id="f_weight" placeholder="15" step="0.1" min="0"></div>
         </div>"""
     else:
         pet_modal_fields = f"""
@@ -997,16 +1010,13 @@ def dashboard(request: Request, tid: str = "", db: Session = Depends(get_db)):
             <select id="f_service">{service_options}</select>
         </div>"""
 
-    # Botão CSV — desabilitado no básico
     csv_btn_html = ""
     if pode_csv:
         csv_btn_html = f'<a href="/api/export/relatorio?mes={mes_atual}" class="btn-icon" title="Exportar {mes_label}" style="text-decoration:none">📥</a>'
     else:
-        csv_btn_html = f'<button class="btn-icon" title="CSV disponível no Plano Pro" onclick="showToast(\'📊 Exportação CSV disponível no Plano Pro e Agência\')" style="opacity:.4;cursor:not-allowed">📥</button>'
+        csv_btn_html = f'<button class="btn-icon" title="CSV disponível no Plano Pro" onclick="showToast(\'📊 CSV disponível no Plano Pro — <a href=\\"{CHECKOUT_LINKS[chr(34) + str("pro") + chr(34)]}\\" target=\\"_blank\\">Fazer upgrade</a>\')" style="opacity:.5;cursor:not-allowed">📥</button>'
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # HTML principal
-    # ─────────────────────────────────────────────────────────────────────────
+    # ── HTML principal ────────────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>
 <html lang="pt-BR" data-theme="light">
 <head>
@@ -1067,50 +1077,33 @@ body{{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);mi
 .stats{{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:18px}}
 @media(max-width:1000px){{.stats{{grid-template-columns:repeat(3,1fr)}}}}
 @media(max-width:600px){{.stats{{grid-template-columns:repeat(2,1fr)}}}}
-.stat-card{{background:var(--surface);border-radius:12px;padding:14px 16px;
-    border:1px solid var(--border);transition:box-shadow .2s}}
+.stat-card{{background:var(--surface);border-radius:12px;padding:14px 16px;border:1px solid var(--border);transition:box-shadow .2s}}
 .stat-card:hover{{box-shadow:0 4px 16px var(--shadow)}}
 .stat-number{{font-size:22px;font-weight:800;color:var(--text);line-height:1}}
 .stat-label{{font-size:11px;color:var(--text3);margin-top:3px;font-weight:500}}
 .stat-card.warn{{border-color:#c67d0060;background:var(--warn-bg)}}
 .stat-card.warn .stat-number{{color:var(--warn)}}
-.card{{background:var(--surface);border-radius:14px;padding:18px;
-    border:1px solid var(--border);margin-bottom:16px}}
-.section-title{{font-size:14px;font-weight:700;color:var(--text);
-    display:flex;align-items:center;gap:7px;margin-bottom:14px}}
-.badge-count{{background:var(--accent-bg);color:var(--accent);
-    font-size:11px;padding:2px 7px;border-radius:20px;font-weight:700}}
-.appt-card{{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;
-    border-radius:10px;border:1px solid var(--border);margin-bottom:8px;
-    background:var(--surface2);transition:box-shadow .2s,border-color .2s}}
+.card{{background:var(--surface);border-radius:14px;padding:18px;border:1px solid var(--border);margin-bottom:16px}}
+.section-title{{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:7px;margin-bottom:14px}}
+.badge-count{{background:var(--accent-bg);color:var(--accent);font-size:11px;padding:2px 7px;border-radius:20px;font-weight:700}}
+.appt-card{{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:8px;background:var(--surface2);transition:box-shadow .2s,border-color .2s}}
 .appt-card:hover{{box-shadow:0 4px 14px var(--shadow2);border-color:var(--accent)}}
-.appt-time{{font-size:18px;font-weight:800;color:var(--accent);
-    min-width:55px;text-align:center;font-family:'DM Mono',monospace;padding-top:2px}}
+.appt-time{{font-size:18px;font-weight:800;color:var(--accent);min-width:55px;text-align:center;font-family:'DM Mono',monospace;padding-top:2px}}
 .appt-body{{flex:1;min-width:0}}
 .appt-client{{font-size:13px;font-weight:700;margin-bottom:2px}}
 .appt-pet,.appt-service{{font-size:12px;color:var(--text2);margin-bottom:1px}}
 .pickup{{font-size:11px;color:var(--info);margin-top:3px;font-weight:600}}
 .appt-actions{{display:flex;flex-direction:column;align-items:flex-end;gap:6px;min-width:160px}}
 .status-badge{{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:700;white-space:nowrap}}
-.status-select{{font-size:12px;padding:4px 7px;border:1px solid var(--border);border-radius:7px;
-    cursor:pointer;background:var(--input-bg);color:var(--text);width:100%;
-    font-family:'DM Sans',sans-serif;outline:none}}
-.btn-cancel{{font-size:11px;color:var(--danger);background:var(--danger-bg);
-    border:1px solid rgba(229,62,62,0.2);padding:3px 8px;border-radius:7px;
-    cursor:pointer;width:100%;font-family:'DM Sans',sans-serif}}
-.btn-cancel-small{{font-size:11px;color:var(--danger);background:var(--danger-bg);
-    border:1px solid rgba(229,62,62,0.2);padding:2px 7px;border-radius:6px;
-    cursor:pointer;font-family:'DM Sans',sans-serif}}
-.btn-pay-now{{font-size:12px;background:var(--warn-bg);color:var(--warn);
-    border:1px solid #c67d0040;padding:5px 12px;border-radius:7px;cursor:pointer;
-    font-weight:600;font-family:'DM Sans',sans-serif;white-space:nowrap}}
+.status-select{{font-size:12px;padding:4px 7px;border:1px solid var(--border);border-radius:7px;cursor:pointer;background:var(--input-bg);color:var(--text);width:100%;font-family:'DM Sans',sans-serif;outline:none}}
+.btn-cancel{{font-size:11px;color:var(--danger);background:var(--danger-bg);border:1px solid rgba(229,62,62,0.2);padding:3px 8px;border-radius:7px;cursor:pointer;width:100%;font-family:'DM Sans',sans-serif}}
+.btn-cancel-small{{font-size:11px;color:var(--danger);background:var(--danger-bg);border:1px solid rgba(229,62,62,0.2);padding:2px 7px;border-radius:6px;cursor:pointer;font-family:'DM Sans',sans-serif}}
+.btn-pay-now{{font-size:12px;background:var(--warn-bg);color:var(--warn);border:1px solid #c67d0040;padding:5px 12px;border-radius:7px;cursor:pointer;font-weight:600;font-family:'DM Sans',sans-serif;white-space:nowrap}}
 .btn-pay-now:hover{{background:#c67d00;color:white}}
 .empty-state{{color:var(--text3);text-align:center;padding:28px;font-size:13px}}
 .table-wrap{{overflow-x:auto}}
 table{{width:100%;border-collapse:collapse}}
-th{{text-align:left;font-size:10px;color:var(--text3);font-weight:600;
-    padding:7px 10px;border-bottom:2px solid var(--border);
-    text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}}
+th{{text-align:left;font-size:10px;color:var(--text3);font-weight:600;padding:7px 10px;border-bottom:2px solid var(--border);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}}
 td{{font-size:12px;padding:10px;border-bottom:1px solid var(--border);color:var(--text)}}
 tr:last-child td{{border-bottom:none}}
 tr:hover td{{background:var(--surface2)}}
@@ -1119,113 +1112,66 @@ tr:hover td{{background:var(--surface2)}}
 .badge-green{{background:var(--success-bg);color:var(--success)}}
 .badge-red{{background:var(--danger-bg);color:var(--danger)}}
 .badge-gray{{background:var(--surface2);color:var(--text3)}}
-.service-edit-row{{display:flex;align-items:center;gap:10px;padding:11px 14px;
-    border:1px solid var(--border);border-radius:10px;margin-bottom:8px;
-    background:var(--surface2);flex-wrap:wrap}}
+.service-edit-row{{display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--surface2);flex-wrap:wrap}}
 .svc-color-dot{{width:10px;height:10px;border-radius:3px;flex-shrink:0}}
-.svc-input{{padding:6px 9px;border:1px solid var(--border);border-radius:8px;
-    background:var(--input-bg);color:var(--text);font-size:13px;
-    font-family:'DM Sans',sans-serif;outline:none}}
+.svc-input{{padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg);color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none}}
 .svc-input:focus{{border-color:var(--accent)}}
-.btn-save-svc{{padding:6px 10px;border-radius:8px;border:1px solid var(--accent);
-    background:var(--accent-bg);color:var(--accent);cursor:pointer;font-size:12px;
-    font-weight:600;font-family:'DM Sans',sans-serif}}
+.btn-save-svc{{padding:6px 10px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-bg);color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif}}
 .btn-save-svc:hover{{background:var(--accent);color:white}}
-.btn-del-svc{{padding:6px 10px;border-radius:8px;border:1px solid rgba(229,62,62,0.3);
-    background:var(--danger-bg);color:var(--danger);cursor:pointer;font-size:12px;
-    font-weight:600;font-family:'DM Sans',sans-serif}}
-.add-svc-form{{background:var(--accent-bg);border:1px dashed var(--accent);
-    border-radius:12px;padding:16px;margin-top:14px}}
+.btn-del-svc{{padding:6px 10px;border-radius:8px;border:1px solid rgba(229,62,62,0.3);background:var(--danger-bg);color:var(--danger);cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif}}
+.add-svc-form{{background:var(--accent-bg);border:1px dashed var(--accent);border-radius:12px;padding:16px;margin-top:14px}}
 .add-svc-title{{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px}}
 .form-row2{{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:end}}
 @media(max-width:600px){{.form-row2{{grid-template-columns:1fr 1fr}}}}
 .config-section{{margin-bottom:22px}}
-.config-section-title{{font-size:12px;font-weight:700;color:var(--text3);
-    text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;
-    padding-bottom:6px;border-bottom:1px solid var(--border)}}
+.config-section-title{{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)}}
 .config-grid2{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}
 @media(max-width:600px){{.config-grid2{{grid-template-columns:1fr}}}}
-.toggle-wrap{{display:flex;align-items:center;justify-content:space-between;
-    padding:12px 14px;background:var(--surface2);border:1px solid var(--border);
-    border-radius:10px;margin-bottom:8px}}
+.toggle-wrap{{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:8px}}
 .toggle-label{{font-size:13px;font-weight:600}}
 .toggle-sub{{font-size:11px;color:var(--text3);margin-top:2px}}
 .toggle-switch{{position:relative;display:inline-block;width:44px;height:24px}}
 .toggle-switch input{{opacity:0;width:0;height:0}}
-.toggle-slider{{width:44px;height:24px;background:var(--border);border-radius:12px;
-    position:absolute;top:0;left:0;transition:background .2s;cursor:pointer}}
-.toggle-slider:before{{content:'';position:absolute;width:18px;height:18px;
-    border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}}
+.toggle-slider{{width:44px;height:24px;background:var(--border);border-radius:12px;position:absolute;top:0;left:0;transition:background .2s;cursor:pointer}}
+.toggle-slider:before{{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}}
 .toggle-switch input:checked + .toggle-slider{{background:var(--accent)}}
 .toggle-switch input:checked + .toggle-slider:before{{transform:translateX(20px)}}
 .days-grid{{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}}
-.day-btn{{padding:6px 12px;border-radius:8px;border:1px solid var(--border);
-    background:var(--input-bg);color:var(--text2);cursor:pointer;font-size:12px;
-    font-weight:700;font-family:'DM Sans',sans-serif;transition:all .15s}}
+.day-btn{{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--input-bg);color:var(--text2);cursor:pointer;font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;transition:all .15s}}
 .day-btn.active{{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}}
-.plan-info{{background:var(--surface2);border:1px solid var(--border);border-radius:10px;
-    padding:14px 16px;display:flex;align-items:center;justify-content:space-between}}
-.modal-overlay{{position:fixed;inset:0;background:var(--overlay);z-index:200;
-    display:flex;align-items:center;justify-content:center;
-    opacity:0;pointer-events:none;transition:opacity .25s;backdrop-filter:blur(4px)}}
+.plan-info{{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between}}
+.modal-overlay{{position:fixed;inset:0;background:var(--overlay);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s;backdrop-filter:blur(4px)}}
 .modal-overlay.open{{opacity:1;pointer-events:all}}
-.modal{{background:var(--modal-bg);border-radius:18px;padding:26px;
-    width:100%;max-width:500px;max-height:90vh;overflow-y:auto;
-    box-shadow:0 20px 60px var(--shadow2);border:1px solid var(--border);
-    transform:translateY(20px);transition:transform .25s;margin:20px}}
+.modal{{background:var(--modal-bg);border-radius:18px;padding:26px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px var(--shadow2);border:1px solid var(--border);transform:translateY(20px);transition:transform .25s;margin:20px}}
 .modal-overlay.open .modal{{transform:translateY(0)}}
-.modal-title{{font-size:16px;font-weight:800;margin-bottom:18px;color:var(--text);
-    display:flex;align-items:center;justify-content:space-between}}
-.modal-close{{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);
-    background:var(--surface2);color:var(--text2);cursor:pointer;font-size:14px;
-    display:flex;align-items:center;justify-content:center}}
+.modal-title{{font-size:16px;font-weight:800;margin-bottom:18px;color:var(--text);display:flex;align-items:center;justify-content:space-between}}
+.modal-close{{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center}}
 .form-group{{margin-bottom:12px}}
 .form-row{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
-label{{display:block;font-size:11px;font-weight:600;color:var(--text2);
-    margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px}}
-input,select{{width:100%;padding:9px 11px;border:1px solid var(--border);
-    border-radius:9px;background:var(--input-bg);color:var(--text);font-size:13px;
-    font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s}}
+label{{display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px}}
+input,select{{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--input-bg);color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s}}
 input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}}
 .slots-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px}}
-.slot-btn{{padding:7px 4px;border:1px solid var(--border);border-radius:7px;
-    background:var(--surface2);color:var(--text);cursor:pointer;font-size:12px;
-    font-weight:600;font-family:'DM Mono',monospace;text-align:center;transition:all .15s}}
+.slot-btn{{padding:7px 4px;border:1px solid var(--border);border-radius:7px;background:var(--surface2);color:var(--text);cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Mono',monospace;text-align:center;transition:all .15s}}
 .slot-btn:hover{{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}}
 .slot-btn.selected{{background:var(--accent);color:white;border-color:var(--accent)}}
 .slot-btn.busy{{background:var(--danger-bg);color:var(--danger);cursor:not-allowed;opacity:.6}}
-.btn-submit{{width:100%;padding:11px;background:var(--accent);color:white;
-    border:none;border-radius:11px;font-size:14px;font-weight:700;
-    font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:4px;transition:background .15s}}
+.btn-submit{{width:100%;padding:11px;background:var(--accent);color:white;border:none;border-radius:11px;font-size:14px;font-weight:700;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:4px;transition:background .15s}}
 .btn-submit:hover{{background:var(--accent2)}}
 .btn-submit:disabled{{opacity:.5;cursor:not-allowed}}
 .pay-method-grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:6px}}
-.pay-method-btn{{padding:10px;border:2px solid var(--border);border-radius:9px;
-    background:var(--surface2);cursor:pointer;font-size:13px;font-weight:600;
-    font-family:'DM Sans',sans-serif;color:var(--text);text-align:center;transition:all .15s}}
+.pay-method-btn{{padding:10px;border:2px solid var(--border);border-radius:9px;background:var(--surface2);cursor:pointer;font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;color:var(--text);text-align:center;transition:all .15s}}
 .pay-method-btn:hover,.pay-method-btn.active{{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}}
 .pix-section{{background:var(--success-bg);border:1px solid rgba(46,125,50,.3);border-radius:10px;padding:12px;margin-top:10px}}
 .pix-review-box{{background:var(--warn-bg);border:1px solid rgba(198,125,0,.3);border-radius:10px;padding:12px;margin-top:10px;font-size:12px;color:var(--warn)}}
 .search-box{{display:flex;gap:8px;margin-bottom:14px}}
-.search-input{{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:9px;
-    background:var(--input-bg);color:var(--text);font-size:13px;
-    font-family:'DM Sans',sans-serif;outline:none}}
-.toast{{position:fixed;bottom:20px;right:20px;background:var(--surface);color:var(--text);
-    padding:11px 18px;border-radius:11px;font-size:12px;font-weight:500;
-    border:1px solid var(--border);box-shadow:0 8px 24px var(--shadow2);
-    opacity:0;transition:opacity .3s,transform .3s;z-index:999;transform:translateY(10px)}}
+.search-input{{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--input-bg);color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none}}
+.toast{{position:fixed;bottom:20px;right:20px;background:var(--surface);color:var(--text);padding:11px 18px;border-radius:11px;font-size:12px;font-weight:500;border:1px solid var(--border);box-shadow:0 8px 24px var(--shadow2);opacity:0;transition:opacity .3s,transform .3s;z-index:999;transform:translateY(10px)}}
 .toast.show{{opacity:1;transform:translateY(0)}}
-.alert-info{{background:var(--info-bg);color:var(--info);border:1px solid rgba(21,101,192,.2);
-    padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:12px}}
-.spinner{{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);
-    border-top-color:white;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}}
+.alert-info{{background:var(--info-bg);color:var(--info);border:1px solid rgba(21,101,192,.2);padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:12px}}
+.spinner{{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}}
 @keyframes spin{{to{{transform:rotate(360deg)}}}}
-@media(max-width:600px){{
-    .appt-card{{flex-direction:column}}
-    .appt-actions{{width:100%;flex-direction:row;flex-wrap:wrap}}
-    .form-row{{grid-template-columns:1fr}}
-    .slots-grid{{grid-template-columns:repeat(3,1fr)}}
-}}
+@media(max-width:600px){{.appt-card{{flex-direction:column}}.appt-actions{{width:100%;flex-direction:row;flex-wrap:wrap}}.form-row{{grid-template-columns:1fr}}.slots-grid{{grid-template-columns:repeat(3,1fr)}}}}
 </style>
 </head>
 <body>
@@ -1268,7 +1214,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     <button class="tab"        onclick="switchTab('config',this)">⚙️ Config</button>
 </div>
 
-<!-- Hoje -->
 <div id="tab-hoje" class="tab-content active">
     <div class="card">
         <div class="section-title">📋 Agenda de Hoje <span class="badge-count">{hoje.strftime("%d/%m")}</span></div>
@@ -1276,7 +1221,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     </div>
 </div>
 
-<!-- Próximos 7 dias -->
 <div id="tab-proximos" class="tab-content">
     <div class="card">
         <div class="section-title">📆 Próximos 7 dias</div>
@@ -1287,7 +1231,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     </div>
 </div>
 
-<!-- Pagamentos pendentes -->
 <div id="tab-pendentes" class="tab-content">
     <div class="card">
         <div class="section-title">⏳ Pagamentos Pendentes
@@ -1300,7 +1243,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     </div>
 </div>
 
-<!-- Histórico -->
 <div id="tab-historico" class="tab-content">
     <div class="card">
         <div class="section-title" style="justify-content:space-between">
@@ -1317,7 +1259,6 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     </div>
 </div>
 
-<!-- Serviços -->
 <div id="tab-servicos" class="tab-content">
     <div class="card">
         <div class="section-title">✂️ Seus serviços</div>
@@ -1329,63 +1270,42 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     </div>
 </div>
 
-<!-- Configurações -->
 <div id="tab-config" class="tab-content">
     <div class="card">
         <div class="section-title">⚙️ Configurações do negócio</div>
         <div class="alert-info">💡 Alterações entram em vigor imediatamente para o bot.</div>
 
-        <!-- Plano -->
         <div class="config-section">
-            <div class="config-section-title">📦 Plano</div>
-            <div class="plan-info">
+            <div class="config-section-title">📦 Plano e Upgrade</div>
+            <div class="plan-info" style="margin-bottom:12px">
                 <div>
                     <div style="font-weight:700;font-size:15px">{plan_label}</div>
-                    <div style="font-size:12px;color:var(--text3);margin-top:2px">Entre em contato para alterar o plano</div>
+                    <div style="font-size:12px;color:var(--text3);margin-top:2px">Assinatura gerenciada pela Kiwify</div>
                 </div>
                 <span class="badge {plan_badge_cls}">{plan_badge_txt}</span>
             </div>
+            {upgrade_cards_html}
             {csv_info}
             {lembretes_info}
         </div>
 
-        <!-- Bot -->
         <div class="config-section">
             <div class="config-section-title">🤖 Bot</div>
             <div class="toggle-wrap">
-                <div>
-                    <div class="toggle-label">Bot ativo</div>
-                    <div class="toggle-sub">Quando pausado, o bot não responde nenhuma mensagem</div>
-                </div>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="cfg_bot_active" {bot_active_checked} onchange="saveToggle('bot_active',this.checked)">
-                    <span class="toggle-slider"></span>
-                </label>
+                <div><div class="toggle-label">Bot ativo</div><div class="toggle-sub">Quando pausado, o bot não responde mensagens</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="cfg_bot_active" {bot_active_checked} onchange="saveToggle('bot_active',this.checked)"><span class="toggle-slider"></span></label>
             </div>
             <div class="toggle-wrap">
-                <div>
-                    <div class="toggle-label">Notificações de novos agendamentos</div>
-                    <div class="toggle-sub">Receber WhatsApp quando o bot confirmar um agendamento</div>
-                </div>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="cfg_notify" {notify_checked} onchange="saveToggle('notify_new_appt',this.checked)">
-                    <span class="toggle-slider"></span>
-                </label>
+                <div><div class="toggle-label">Notificações de novos agendamentos</div><div class="toggle-sub">Receber WhatsApp quando o bot confirmar</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="cfg_notify" {notify_checked} onchange="saveToggle('notify_new_appt',this.checked)"><span class="toggle-slider"></span></label>
             </div>
         </div>
 
-        <!-- Dados do negócio -->
         <div class="config-section">
             <div class="config-section-title">🏢 Dados do negócio</div>
             <div class="config-grid2">
-                <div class="form-group">
-                    <label>Nome exibido</label>
-                    <input type="text" id="cfg_display_name" value="{tenant_name}">
-                </div>
-                <div class="form-group">
-                    <label>Nome da atendente virtual</label>
-                    <input type="text" id="cfg_attendant" value="{current_attendant}">
-                </div>
+                <div class="form-group"><label>Nome exibido</label><input type="text" id="cfg_display_name" value="{tenant_name}"></div>
+                <div class="form-group"><label>Nome da atendente virtual</label><input type="text" id="cfg_attendant" value="{current_attendant}"></div>
             </div>
             <div class="form-group">
                 <label>WhatsApp para notificações (com DDI e DDD)</label>
@@ -1394,18 +1314,11 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
             <button class="btn-submit" style="max-width:200px" onclick="saveConfig()">💾 Salvar dados</button>
         </div>
 
-        <!-- Horários -->
         <div class="config-section">
             <div class="config-section-title">⏰ Horários de atendimento</div>
             <div class="config-grid2">
-                <div class="form-group">
-                    <label>Abre às</label>
-                    <input type="time" id="cfg_open_time" value="{current_open}">
-                </div>
-                <div class="form-group">
-                    <label>Fecha às</label>
-                    <input type="time" id="cfg_close_time" value="{current_close}">
-                </div>
+                <div class="form-group"><label>Abre às</label><input type="time" id="cfg_open_time" value="{current_open}"></div>
+                <div class="form-group"><label>Fecha às</label><input type="time" id="cfg_close_time" value="{current_close}"></div>
             </div>
             <div class="form-group">
                 <label>Dias de atendimento</label>
@@ -1415,18 +1328,11 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
             <button class="btn-submit" style="max-width:200px" onclick="saveHorarios()">💾 Salvar horários</button>
         </div>
 
-        <!-- Senha -->
         <div class="config-section">
             <div class="config-section-title">🔑 Alterar senha</div>
             <div class="config-grid2">
-                <div class="form-group">
-                    <label>Senha atual</label>
-                    <input type="password" id="cfg_pw_current" placeholder="••••••••">
-                </div>
-                <div class="form-group">
-                    <label>Nova senha (mín. 6 caracteres)</label>
-                    <input type="password" id="cfg_pw_new" placeholder="••••••••">
-                </div>
+                <div class="form-group"><label>Senha atual</label><input type="password" id="cfg_pw_current" placeholder="••••••••"></div>
+                <div class="form-group"><label>Nova senha (mín. 6 caracteres)</label><input type="password" id="cfg_pw_new" placeholder="••••••••"></div>
             </div>
             <button class="btn-submit" style="max-width:200px;background:var(--warn)" onclick="changePassword()">🔑 Alterar senha</button>
             <div style="font-size:11px;color:var(--text3);margin-top:8px">⚠️ Você será desconectado após trocar a senha.</div>
@@ -1434,44 +1340,32 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
     </div>
 </div>
 
-</div><!-- /container -->
+</div>
 
-<!-- Modal: Agendamento -->
+<!-- Modal Agendamento -->
 <div class="modal-overlay" id="modalOverlay" onclick="handleOverlayClick(event)">
 <div class="modal">
     <div class="modal-title">➕ Novo Agendamento <button class="modal-close" onclick="closeModal()">✕</button></div>
-    <div class="form-group">
-        <label>👤 Nome do cliente *</label>
-        <input type="text" id="f_customer" placeholder="Ex: João Silva" autocomplete="off">
-    </div>
+    <div class="form-group"><label>👤 Nome do cliente *</label><input type="text" id="f_customer" placeholder="Ex: João Silva" autocomplete="off"></div>
     {pet_modal_fields}
-    <div class="form-group">
-        <label>📅 Data *</label>
-        <input type="date" id="f_date" onchange="loadSlots()">
-    </div>
+    <div class="form-group"><label>📅 Data *</label><input type="date" id="f_date" onchange="loadSlots()"></div>
     <div class="form-group" id="slots-group" style="display:none">
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Horários disponíveis</div>
         <div class="slots-grid" id="slots-grid"></div>
         <input type="hidden" id="f_time">
     </div>
-    <div class="form-group">
-        <label>🏠 Horário de busca (opcional)</label>
-        <input type="time" id="f_pickup">
-    </div>
+    <div class="form-group"><label>🏠 Horário de busca (opcional)</label><input type="time" id="f_pickup"></div>
     {address_modal_field}
     <button class="btn-submit" id="btn-submit" onclick="submitAppt()">Confirmar Agendamento</button>
 </div>
 </div>
 
-<!-- Modal: Pagamento -->
+<!-- Modal Pagamento -->
 <div class="modal-overlay" id="payModalOverlay" onclick="handlePayOverlayClick(event)">
 <div class="modal">
     <div class="modal-title">💳 Registrar Pagamento <button class="modal-close" onclick="closePayModal()">✕</button></div>
     <input type="hidden" id="pay_appt_id">
-    <div class="form-group">
-        <label>Valor (R$)</label>
-        <input type="number" id="pay_amount" step="0.01" placeholder="0.00">
-    </div>
+    <div class="form-group"><label>Valor (R$)</label><input type="number" id="pay_amount" step="0.01" placeholder="0.00"></div>
     <div class="form-group">
         <label>Forma de pagamento</label>
         <div class="pay-method-grid">
@@ -1483,19 +1377,12 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
         <input type="hidden" id="pay_method" value="">
     </div>
     <div id="pix_section" style="display:none">
-        <div class="pix-section">
-            <label style="color:var(--success);margin-bottom:6px;display:block">📱 Comprovante PIX</label>
-            <input type="text" id="pay_pix_key" placeholder="Cole o ID/código do comprovante">
-            <div style="font-size:11px;color:var(--success);margin-top:6px">💡 Cole o ID para rastreio e auditoria</div>
-        </div>
-        <div class="pix-review-box">
-            ⚠️ <strong>Atenção:</strong> Confirme no seu app bancário antes de registrar.
-        </div>
+        <div class="pix-section"><label style="color:var(--success);margin-bottom:6px;display:block">📱 Comprovante PIX</label>
+        <input type="text" id="pay_pix_key" placeholder="Cole o ID/código do comprovante">
+        <div style="font-size:11px;color:var(--success);margin-top:6px">💡 Cole o ID para rastreio</div></div>
+        <div class="pix-review-box">⚠️ <strong>Atenção:</strong> Confirme no seu app bancário antes de registrar.</div>
     </div>
-    <div class="form-group" style="margin-top:12px">
-        <label>Observação</label>
-        <input type="text" id="pay_notes" placeholder="Ex: Desconto aplicado...">
-    </div>
+    <div class="form-group" style="margin-top:12px"><label>Observação</label><input type="text" id="pay_notes" placeholder="Ex: Desconto aplicado..."></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
         <button class="btn-submit" style="background:var(--success)" onclick="confirmPayment('paid')">✅ Confirmar Pago</button>
         <button class="btn-submit" style="background:#6a1b9a" onclick="confirmPayment('waived')">🎁 Isentar</button>
@@ -1512,7 +1399,6 @@ const ALL_SLOTS  = {slots_json};
 const SHOW_PET   = {'true' if show_pet else 'false'};
 const NEEDS_ADDR = {'true' if needs_address else 'false'};
 
-// Tema
 const savedTheme = localStorage.getItem('theme') || 'light';
 document.documentElement.setAttribute('data-theme', savedTheme);
 document.getElementById('theme-btn').textContent = savedTheme === 'dark' ? '☀️' : '🌙';
@@ -1522,53 +1408,38 @@ function toggleTheme() {{
     localStorage.setItem('theme', n);
     document.getElementById('theme-btn').textContent = n === 'dark' ? '☀️' : '🌙';
 }}
-
-// Tabs
 function switchTab(name, btn) {{
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('tab-' + name).classList.add('active');
     btn.classList.add('active');
 }}
-
-// Toast
 function showToast(msg) {{
     const t = document.getElementById('toast');
-    t.textContent = msg;
+    t.innerHTML = msg;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2800);
 }}
-
-// Auto refresh
 let refreshTimer = null;
 function scheduleRefresh() {{
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {{
-        const modalsOpen = ['modalOverlay','payModalOverlay'].some(
-            id => document.getElementById(id).classList.contains('open')
-        );
-        if (!modalsOpen) location.reload();
-        else scheduleRefresh();
+        const modalsOpen = ['modalOverlay','payModalOverlay'].some(id => document.getElementById(id).classList.contains('open'));
+        if (!modalsOpen) location.reload(); else scheduleRefresh();
     }}, 60000);
 }}
 function refreshData() {{
-    const btn = document.getElementById('refresh-btn');
-    btn.innerHTML = '<span class="spinner"></span>';
+    document.getElementById('refresh-btn').innerHTML = '<span class="spinner"></span>';
     setTimeout(() => location.reload(), 300);
 }}
 scheduleRefresh();
 
-// Status
 async function updateStatus(id, status) {{
-    const r = await fetch(`/api/appointment/${{id}}/status`, {{
-        method: 'POST', headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{status}})
-    }});
+    const r = await fetch(`/api/appointment/${{id}}/status`, {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{status}})}});
     const d = await r.json();
     if (d.success) {{ showToast('✅ Status atualizado!'); setTimeout(() => location.reload(), 900); }}
     else showToast('❌ Erro ao atualizar');
 }}
-
 async function cancelAppt(id) {{
     if (!confirm('Cancelar este agendamento?')) return;
     const r = await fetch(`/api/appointment/${{id}}/cancel`);
@@ -1577,7 +1448,6 @@ async function cancelAppt(id) {{
     else showToast('❌ Erro ao cancelar');
 }}
 
-// Modal agendamento
 function openModal() {{
     document.getElementById('modalOverlay').classList.add('open');
     const today = new Date().toISOString().split('T')[0];
@@ -1598,8 +1468,7 @@ async function loadSlots() {{
     try {{
         const r = await fetch(`/api/availability?date=${{date}}&tid=${{TENANT_ID}}`);
         const d = await r.json();
-        busy = d.busy || [];
-        dayBlocked = d.day_blocked || false;
+        busy = d.busy || []; dayBlocked = d.day_blocked || false;
     }} catch(e) {{}}
     const grid = document.getElementById('slots-grid');
     grid.innerHTML = '';
@@ -1610,10 +1479,10 @@ async function loadSlots() {{
     }} else {{
         ALL_SLOTS.forEach(slot => {{
             const isBusy = busy.includes(slot);
-            const btn    = document.createElement('button');
+            const btn = document.createElement('button');
             btn.textContent = slot;
-            btn.className   = 'slot-btn' + (isBusy ? ' busy' : '');
-            btn.disabled    = isBusy;
+            btn.className = 'slot-btn' + (isBusy ? ' busy' : '');
+            btn.disabled = isBusy;
             if (!isBusy) btn.onclick = () => selectSlot(slot, btn);
             grid.appendChild(btn);
         }});
@@ -1626,7 +1495,6 @@ function selectSlot(time, btn) {{
     selectedTime = time;
     document.getElementById('f_time').value = time;
 }}
-
 async function submitAppt() {{
     const customer   = document.getElementById('f_customer').value.trim();
     const service_id = document.getElementById('f_service').value;
@@ -1637,46 +1505,23 @@ async function submitAppt() {{
     const pet        = SHOW_PET ? document.getElementById('f_pet')?.value.trim() : '';
     const breed      = SHOW_PET ? document.getElementById('f_breed')?.value.trim() : '';
     const weight     = SHOW_PET ? document.getElementById('f_weight')?.value : '';
-
-    if (!customer || !service_id || !date || !time) {{
-        showToast('⚠️ Preencha todos os campos obrigatórios e escolha um horário');
-        return;
-    }}
+    if (!customer || !service_id || !date || !time) {{ showToast('⚠️ Preencha todos os campos e escolha um horário'); return; }}
     if (SHOW_PET && !pet) {{ showToast('⚠️ Informe o nome do {subject}'); return; }}
     if (NEEDS_ADDR && !address.trim()) {{ showToast('⚠️ Informe o endereço'); return; }}
-
     const btn = document.getElementById('btn-submit');
-    btn.disabled    = true;
-    btn.innerHTML   = '<span class="spinner"></span> Salvando...';
-
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Salvando...';
     try {{
-        const payload = {{
-            customer_name: customer, service_id,
-            scheduled_at: date + 'T' + time + ':00',
-            pickup_time:    pickup || null,
-            pickup_address: address || null,
-            pet_name:   pet    || null,
-            pet_breed:  breed  || null,
-            pet_weight: weight ? parseFloat(weight) : null,
-        }};
         const r = await fetch('/api/appointment/create', {{
-            method: 'POST', headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify(payload),
+            method:'POST',headers:{{'Content-Type':'application/json'}},
+            body:JSON.stringify({{customer_name:customer,service_id,scheduled_at:date+'T'+time+':00',pickup_time:pickup||null,pickup_address:address||null,pet_name:pet||null,pet_breed:breed||null,pet_weight:weight?parseFloat(weight):null}})
         }});
         const d = await r.json();
-        if (d.success) {{
-            showToast('🎉 Agendado com sucesso!');
-            closeModal();
-            setTimeout(() => location.reload(), 1000);
-        }} else {{
-            showToast('❌ ' + (d.error || 'Erro ao agendar'));
-        }}
+        if (d.success) {{ showToast('🎉 Agendado!'); closeModal(); setTimeout(() => location.reload(), 1000); }}
+        else showToast('❌ ' + (d.error || 'Erro ao agendar'));
     }} catch(e) {{ showToast('❌ Erro de conexão'); }}
-    btn.disabled  = false;
-    btn.innerHTML = 'Confirmar Agendamento';
+    btn.disabled = false; btn.innerHTML = 'Confirmar Agendamento';
 }}
 
-// Modal pagamento
 function openPayModal(apptId, defaultAmount) {{
     document.getElementById('pay_appt_id').value = apptId;
     document.getElementById('pay_amount').value  = defaultAmount ? defaultAmount.toFixed(2) : '';
@@ -1706,42 +1551,27 @@ async function confirmPayment(status) {{
         if (!confirm('⚠️ Confirmou o recebimento no seu banco?\\n\\nNão confirme sem verificar o extrato.')) return;
     }}
     try {{
-        const r = await fetch(`/api/appointment/${{apptId}}/payment`, {{
-            method: 'POST', headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify({{
-                payment_status: status, payment_method: method || null,
-                payment_amount: amount ? parseFloat(amount) : null,
-                payment_pix_key: pixKey || null, payment_notes: notes || null,
-            }}),
-        }});
+        const r = await fetch(`/api/appointment/${{apptId}}/payment`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{payment_status:status,payment_method:method||null,payment_amount:amount?parseFloat(amount):null,payment_pix_key:pixKey||null,payment_notes:notes||null}})}});
         const d = await r.json();
         if (d.success) {{
-            const msgs = {{paid:'✅ Pagamento confirmado!', waived:'🎁 Isento!', pending:'⏳ Mantido pendente'}};
-            showToast(msgs[status] || '✅ Atualizado!');
-            closePayModal();
-            setTimeout(() => location.reload(), 900);
-        }} else showToast('❌ ' + (d.error || 'Erro'));
+            const msgs={{paid:'✅ Pagamento confirmado!',waived:'🎁 Isento!',pending:'⏳ Mantido pendente'}};
+            showToast(msgs[status]||'✅ Atualizado!'); closePayModal(); setTimeout(()=>location.reload(),900);
+        }} else showToast('❌ '+(d.error||'Erro'));
     }} catch(e) {{ showToast('❌ Erro de conexão'); }}
 }}
 
-// Serviços
 async function saveService(id) {{
-    const price = document.getElementById('price-' + id).value;
-    const dur   = document.getElementById('dur-' + id).value;
-    const r = await fetch(`/api/service/${{id}}/update`, {{
-        method: 'POST', headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{price: parseFloat(price), duration_min: parseInt(dur)}}),
-    }});
+    const price = document.getElementById('price-'+id).value;
+    const dur   = document.getElementById('dur-'+id).value;
+    const r = await fetch(`/api/service/${{id}}/update`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{price:parseFloat(price),duration_min:parseInt(dur)}})}});
     const d = await r.json();
-    if (d.success) showToast('✅ Serviço salvo!');
-    else showToast('❌ Erro ao salvar');
+    if (d.success) showToast('✅ Serviço salvo!'); else showToast('❌ Erro ao salvar');
 }}
 async function deleteService(id) {{
     if (!confirm('Desativar este serviço?')) return;
-    const r = await fetch(`/api/service/${{id}}`, {{method: 'DELETE'}});
+    const r = await fetch(`/api/service/${{id}}`,{{method:'DELETE'}});
     const d = await r.json();
-    if (d.success) {{ showToast('🗑️ Serviço desativado'); setTimeout(() => location.reload(), 800); }}
-    else showToast('❌ Erro');
+    if (d.success) {{ showToast('🗑️ Serviço desativado'); setTimeout(()=>location.reload(),800); }} else showToast('❌ Erro');
 }}
 async function addService() {{
     const name  = document.getElementById('ns_name').value.trim();
@@ -1749,16 +1579,11 @@ async function addService() {{
     const dur   = document.getElementById('ns_dur').value;
     const desc  = document.getElementById('ns_desc').value.trim();
     if (!name) {{ showToast('⚠️ Nome é obrigatório'); return; }}
-    const r = await fetch('/api/service/create', {{
-        method: 'POST', headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{name, price: parseFloat(price)||0, duration_min: parseInt(dur)||60, description: desc}}),
-    }});
+    const r = await fetch('/api/service/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{name,price:parseFloat(price)||0,duration_min:parseInt(dur)||60,description:desc}})}});
     const d = await r.json();
-    if (d.success) {{ showToast('✅ Serviço adicionado!'); setTimeout(() => location.reload(), 800); }}
-    else showToast('❌ ' + (d.error || 'Erro'));
+    if (d.success) {{ showToast('✅ Serviço adicionado!'); setTimeout(()=>location.reload(),800); }} else showToast('❌ '+(d.error||'Erro'));
 }}
 
-// Histórico busca
 function filterTable() {{
     const q = document.getElementById('search-input').value.toLowerCase();
     document.querySelectorAll('#historico-body tr').forEach(row => {{
@@ -1766,72 +1591,46 @@ function filterTable() {{
     }});
 }}
 
-// Configurações
 function toggleConfigDay(btn) {{
     btn.classList.toggle('active');
     const active = [...document.querySelectorAll('#cfg-days-grid .day-btn.active')].map(b => b.dataset.day);
     document.getElementById('cfg_open_days').value = active.join(',');
 }}
-
 async function saveConfig() {{
-    const display_name       = document.getElementById('cfg_display_name').value.trim();
+    const display_name = document.getElementById('cfg_display_name').value.trim();
     const bot_attendant_name = document.getElementById('cfg_attendant').value.trim();
-    const owner_phone        = document.getElementById('cfg_owner_phone').value.trim();
+    const owner_phone = document.getElementById('cfg_owner_phone').value.trim();
     if (!display_name) {{ showToast('⚠️ Nome não pode ser vazio'); return; }}
-    const r = await fetch('/api/tenant/config', {{
-        method: 'POST', headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{display_name, bot_attendant_name, owner_phone}}),
-    }});
+    const r = await fetch('/api/tenant/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{display_name,bot_attendant_name,owner_phone}})}});
     const d = await r.json();
-    if (d.success) showToast('✅ Dados salvos!');
-    else showToast('❌ ' + (d.error || 'Erro'));
+    if (d.success) showToast('✅ Dados salvos!'); else showToast('❌ '+(d.error||'Erro'));
 }}
-
 async function saveHorarios() {{
     const open_time  = document.getElementById('cfg_open_time').value;
     const close_time = document.getElementById('cfg_close_time').value;
     const open_days  = document.getElementById('cfg_open_days').value;
     if (!open_days) {{ showToast('⚠️ Selecione ao menos 1 dia'); return; }}
-    const r = await fetch('/api/tenant/config', {{
-        method: 'POST', headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{open_time, close_time, open_days}}),
-    }});
+    const r = await fetch('/api/tenant/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{open_time,close_time,open_days}})}});
     const d = await r.json();
-    if (d.success) {{ showToast('✅ Horários salvos! Recarregando...'); setTimeout(() => location.reload(), 1200); }}
-    else showToast('❌ ' + (d.error || 'Erro'));
+    if (d.success) {{ showToast('✅ Horários salvos!'); setTimeout(()=>location.reload(),1200); }} else showToast('❌ '+(d.error||'Erro'));
 }}
-
 async function saveToggle(field, value) {{
     const payload = {{}};
     payload[field] = value;
-    const r = await fetch('/api/tenant/config', {{
-        method: 'POST', headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify(payload),
-    }});
+    const r = await fetch('/api/tenant/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
     const d = await r.json();
-    const label = field === 'bot_active'
-        ? (value ? '🤖 Bot ativado!' : '⏸ Bot pausado!')
-        : (value ? '🔔 Notificações ativadas!' : '🔕 Notificações desativadas!');
-    if (d.success) showToast(label);
-    else showToast('❌ Erro ao salvar');
+    const label = field==='bot_active'?(value?'🤖 Bot ativado!':'⏸ Bot pausado!'):(value?'🔔 Notificações ativadas!':'🔕 Notificações desativadas!');
+    if (d.success) showToast(label); else showToast('❌ Erro ao salvar');
 }}
-
 async function changePassword() {{
     const current = document.getElementById('cfg_pw_current').value;
     const newpw   = document.getElementById('cfg_pw_new').value;
     if (!current || !newpw) {{ showToast('⚠️ Preencha os dois campos'); return; }}
     if (newpw.length < 6) {{ showToast('⚠️ Nova senha deve ter ao menos 6 caracteres'); return; }}
-    const r = await fetch('/api/tenant/password', {{
-        method: 'POST', headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{current_password: current, new_password: newpw}}),
-    }});
+    const r = await fetch('/api/tenant/password',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{current_password:current,new_password:newpw}})}});
     const d = await r.json();
-    if (d.success) {{
-        showToast('✅ Senha alterada! Fazendo logout...');
-        setTimeout(() => window.location.href = '/dashboard/logout?tid={tid}', 1500);
-    }} else {{
-        showToast('❌ ' + (d.error || 'Erro ao alterar senha'));
-    }}
+    if (d.success) {{ showToast('✅ Senha alterada! Fazendo logout...'); setTimeout(()=>window.location.href='/dashboard/logout?tid={tid}',1500); }}
+    else showToast('❌ '+(d.error||'Erro ao alterar senha'));
 }}
 </script>
 </body></html>"""
@@ -1841,11 +1640,4 @@ async function changePassword() {{
 @router.get("/debug/tenants")
 def debug_tenants(db: Session = Depends(get_db)):
     tenants = db.query(Tenant).all()
-    return [
-        {
-            "id": t.id,
-            "name": t.name,
-            "appointments": db.query(Appointment).filter(Appointment.tenant_id == t.id).count()
-        }
-        for t in tenants
-    ]
+    return [{"id": t.id, "name": t.name, "appointments": db.query(Appointment).filter(Appointment.tenant_id == t.id).count()} for t in tenants]

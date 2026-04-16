@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from sqlalchemy import text, inspect as sa_inspect
@@ -19,7 +21,8 @@ def _require_admin(request: Request):
         raise HTTPException(status_code=401, detail="Não autorizado")
 
 
-# ── Migration v1+v2 ───────────────────────────────────────────────────────────
+# ── Migrations ────────────────────────────────────────────────────────────────
+
 def _auto_migrate():
     novas_colunas = {
         "tenants": [
@@ -61,7 +64,6 @@ def _auto_migrate():
 _auto_migrate()
 
 
-# ── Migration v3 ──────────────────────────────────────────────────────────────
 def _auto_migrate_v3():
     try:
         inspector = sa_inspect(engine)
@@ -80,7 +82,7 @@ def _auto_migrate_v3():
                         conn.execute(text(f"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS {col} {tipo}"))
                         print(f"[migrate-v3] ok tenants.{col}")
                     except Exception as e:
-                        print(f"[migrate-v3] skip tenants.{col}: {e}")
+                        print(f"[migrate-v3] skip: {e}")
             try:
                 conn.execute(text("""CREATE TABLE IF NOT EXISTS blocked_slots (
                     id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL,
@@ -97,9 +99,8 @@ def _auto_migrate_v3():
 _auto_migrate_v3()
 
 
-# ── Migration v4 ──────────────────────────────────────────────────────────────
 def _auto_migrate_v4():
-    novas_colunas = {
+    novas = {
         "tenants": [
             ("needs_address", "BOOLEAN DEFAULT FALSE"),
             ("address_label", "VARCHAR DEFAULT 'Endereço de busca'"),
@@ -109,14 +110,12 @@ def _auto_migrate_v4():
             ("plan_active",   "BOOLEAN DEFAULT TRUE"),
             ("billing_email", "VARCHAR"),
         ],
-        "appointments": [
-            ("pickup_address", "VARCHAR"),
-        ],
+        "appointments": [("pickup_address", "VARCHAR")],
     }
     try:
         inspector = sa_inspect(engine)
         with engine.connect() as conn:
-            for tabela, cols in novas_colunas.items():
+            for tabela, cols in novas.items():
                 try:
                     existentes = {c["name"] for c in inspector.get_columns(tabela)}
                 except Exception:
@@ -125,7 +124,6 @@ def _auto_migrate_v4():
                     if col not in existentes:
                         try:
                             conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
-                            print(f"[migrate-v4] ok {tabela}.{col}")
                         except Exception as e:
                             print(f"[migrate-v4] skip {tabela}.{col}: {e}")
             conn.commit()
@@ -136,28 +134,16 @@ def _auto_migrate_v4():
 _auto_migrate_v4()
 
 
-# ── Migration v5 ──────────────────────────────────────────────────────────────
 def _auto_migrate_v5():
-    novas_colunas = {
-        "tenants": [
-            ("plan_tenant_group", "VARCHAR"),
-        ],
-    }
     try:
         inspector = sa_inspect(engine)
         with engine.connect() as conn:
-            for tabela, cols in novas_colunas.items():
-                try:
-                    existentes = {c["name"] for c in inspector.get_columns(tabela)}
-                except Exception:
-                    existentes = set()
-                for col, tipo in cols:
-                    if col not in existentes:
-                        try:
-                            conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
-                            print(f"[migrate-v5] ok {tabela}.{col}")
-                        except Exception as e:
-                            print(f"[migrate-v5] skip {tabela}.{col}: {e}")
+            try:
+                existentes = {c["name"] for c in inspector.get_columns("tenants")}
+            except Exception:
+                existentes = set()
+            if "plan_tenant_group" not in existentes:
+                conn.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_tenant_group VARCHAR"))
             conn.commit()
         print("[migrate-v5] concluida.")
     except Exception as e:
@@ -166,68 +152,118 @@ def _auto_migrate_v5():
 _auto_migrate_v5()
 
 
-# ── Migration v6: Evolution por tenant (escalabilidade multi-servidor) ────────
 def _auto_migrate_v6():
-    """
-    Adiciona evolution_url e evolution_key por tenant.
-    Permite que cada cliente use um servidor Evolution diferente,
-    possibilitando escalar horizontalmente sem limites.
-    Se vazios, o sistema usa as variáveis globais EVOLUTION_API_URL/KEY do .env.
-    """
-    novas_colunas = {
-        "tenants": [
-            ("evolution_url", "VARCHAR"),  # URL da Evolution deste tenant (opcional)
-            ("evolution_key", "VARCHAR"),  # API key da Evolution deste tenant (opcional)
-        ],
-    }
+    """Evolution por tenant — escalabilidade multi-servidor."""
     try:
         inspector = sa_inspect(engine)
         with engine.connect() as conn:
-            for tabela, cols in novas_colunas.items():
-                try:
-                    existentes = {c["name"] for c in inspector.get_columns(tabela)}
-                except Exception:
-                    existentes = set()
-                for col, tipo in cols:
-                    if col not in existentes:
-                        try:
-                            conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS {col} {tipo}"))
-                            print(f"[migrate-v6] ok {tabela}.{col}")
-                        except Exception as e:
-                            print(f"[migrate-v6] skip {tabela}.{col}: {e}")
+            try:
+                existentes = {c["name"] for c in inspector.get_columns("tenants")}
+            except Exception:
+                existentes = set()
+            for col in ["evolution_url", "evolution_key"]:
+                if col not in existentes:
+                    try:
+                        conn.execute(text(f"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS {col} VARCHAR"))
+                        print(f"[migrate-v6] ok tenants.{col}")
+                    except Exception as e:
+                        print(f"[migrate-v6] skip {col}: {e}")
             conn.commit()
         print("[migrate-v6] concluida.")
     except Exception as e:
         print(f"[migrate-v6] erro: {e}")
 
 _auto_migrate_v6()
-# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _auto_migrate_v7():
+    """next_billing_date — para aviso de vencimento."""
+    try:
+        inspector = sa_inspect(engine)
+        with engine.connect() as conn:
+            try:
+                existentes = {c["name"] for c in inspector.get_columns("tenants")}
+            except Exception:
+                existentes = set()
+            if "next_billing_date" not in existentes:
+                conn.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS next_billing_date DATE"))
+                print("[migrate-v7] ok tenants.next_billing_date")
+            conn.commit()
+        print("[migrate-v7] concluida.")
+    except Exception as e:
+        print(f"[migrate-v7] erro: {e}")
+
+_auto_migrate_v7()
+
+
+# ── Scheduler loops ───────────────────────────────────────────────────────────
+
+def _segundos_ate(hora: int, minuto: int = 0) -> float:
+    """Segundos até o próximo HH:MM (hoje ou amanhã)."""
+    from datetime import datetime
+    import pytz
+    BRASILIA = pytz.timezone("America/Sao_Paulo")
+    agora    = datetime.now(BRASILIA).replace(tzinfo=None)
+    target   = agora.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+    if agora >= target:
+        target = target.replace(day=target.day + 1)
+    return (target - agora).total_seconds()
 
 
 async def reminder_loop():
+    """Lembretes de agendamento — todo dia às 18h."""
     from .services.reminder import send_daily_reminders
-    from datetime import datetime
     while True:
-        agora  = datetime.now()
-        target = agora.replace(hour=18, minute=0, second=0, microsecond=0)
-        if agora >= target:
-            target = target.replace(day=target.day + 1)
-        segundos = (target - agora).total_seconds()
-        print(f"[Lembretes] Proximo envio em {int(segundos/3600)}h {int((segundos%3600)/60)}min")
+        segundos = _segundos_ate(18, 0)
+        print(f"[Lembretes] Próximo envio em {int(segundos/3600)}h {int((segundos%3600)/60)}min")
         await asyncio.sleep(segundos)
         await send_daily_reminders()
 
 
+async def weekly_report_loop():
+    """Relatório semanal — toda segunda-feira às 8h."""
+    from .services.scheduler import send_weekly_reports
+    from datetime import datetime
+    import pytz
+    BRASILIA = pytz.timezone("America/Sao_Paulo")
+    while True:
+        agora    = datetime.now(BRASILIA).replace(tzinfo=None)
+        # Dias até segunda (weekday 0)
+        dias_ate_seg = (7 - agora.weekday()) % 7
+        if dias_ate_seg == 0 and agora.hour >= 8:
+            dias_ate_seg = 7  # já passou das 8h de segunda, espera a próxima
+        target = (agora + __import__('datetime').timedelta(days=dias_ate_seg)).replace(
+            hour=8, minute=0, second=0, microsecond=0
+        )
+        segundos = (target - agora).total_seconds()
+        print(f"[Relatorio] Próximo envio em {int(segundos/3600)}h")
+        await asyncio.sleep(segundos)
+        await send_weekly_reports()
+
+
+async def expiry_warning_loop():
+    """Aviso de vencimento — todo dia às 9h."""
+    from .services.scheduler import send_expiry_warnings
+    while True:
+        segundos = _segundos_ate(9, 0)
+        await asyncio.sleep(segundos)
+        await send_expiry_warnings()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(reminder_loop())
+    tasks = [
+        asyncio.create_task(reminder_loop()),
+        asyncio.create_task(weekly_report_loop()),
+        asyncio.create_task(expiry_warning_loop()),
+    ]
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(
     title="AgendaBot API",
-    description="Chatbot de agendamento para negocios locais",
     version="1.0.0",
     lifespan=lifespan,
     docs_url=None if os.getenv("ENVIRONMENT") == "production" else "/docs",
@@ -253,84 +289,37 @@ def health():
     return {"status": "healthy"}
 
 
-# ── Rotas utilitárias protegidas ──────────────────────────────────────────────
+# ── Página de vendas ──────────────────────────────────────────────────────────
+
+@app.get("/planos", response_class=HTMLResponse)
+async def landing_page():
+    """Serve a landing page de vendas."""
+    landing_path = os.path.join(os.path.dirname(__file__), "..", "landing.html")
+    if os.path.exists(landing_path):
+        with open(landing_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse("<h1>AgendaBot</h1><p>Página em construção.</p>")
+
+
+# ── Rotas utilitárias ─────────────────────────────────────────────────────────
 
 @app.post("/test/reminders")
 async def test_reminders(request: Request):
     _require_admin(request)
     from .services.reminder import send_daily_reminders
     await send_daily_reminders()
-    return {"status": "ok", "message": "Lembretes enviados!"}
+    return {"status": "ok"}
 
-@app.post("/setup/tenant")
-def setup_tenant(data: dict, request: Request):
+@app.post("/test/weekly-report")
+async def test_weekly_report(request: Request):
     _require_admin(request)
-    from .database import SessionLocal
-    from .models import Tenant, Service
-    db = SessionLocal()
-    try:
-        existing = db.query(Tenant).filter(Tenant.name == data["name"]).first()
-        if existing:
-            return {"tenant_id": existing.id, "message": "ja existe"}
-        tenant = Tenant(
-            name=data["name"],
-            business_type=data.get("business_type", "petshop"),
-            phone_number_id=data.get("phone_number_id"),
-            wa_access_token=data.get("wa_access_token"),
-        )
-        db.add(tenant)
-        db.commit()
-        db.refresh(tenant)
-        for s in [
-            {"name": "Banho simples",  "duration_min": 60, "price": 4000},
-            {"name": "Banho e tosa",   "duration_min": 90, "price": 7000},
-            {"name": "Tosa higienica", "duration_min": 45, "price": 3500},
-        ]:
-            db.add(Service(tenant_id=tenant.id, **s))
-        db.commit()
-        return {"tenant_id": tenant.id, "message": "criado com sucesso"}
-    finally:
-        db.close()
+    from .services.scheduler import send_weekly_reports
+    await send_weekly_reports()
+    return {"status": "ok"}
 
-@app.post("/admin/migrate")
-def migrate_legacy(request: Request):
+@app.post("/test/expiry-warnings")
+async def test_expiry_warnings(request: Request):
     _require_admin(request)
-    with engine.connect() as conn:
-        conn.execute(text("""
-            ALTER TABLE appointments
-            ADD COLUMN IF NOT EXISTS pet_id VARCHAR,
-            ADD COLUMN IF NOT EXISTS pet_name VARCHAR,
-            ADD COLUMN IF NOT EXISTS pet_breed VARCHAR,
-            ADD COLUMN IF NOT EXISTS pet_weight FLOAT,
-            ADD COLUMN IF NOT EXISTS pickup_time VARCHAR;
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS pets (
-                id VARCHAR PRIMARY KEY,
-                tenant_id VARCHAR NOT NULL,
-                customer_id VARCHAR NOT NULL,
-                name VARCHAR NOT NULL,
-                breed VARCHAR,
-                weight FLOAT,
-                notes TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-        """))
-        conn.commit()
-    return {"success": True}
-
-@app.post("/admin/rename-tenant")
-def rename_tenant(data: dict, request: Request):
-    _require_admin(request)
-    from .database import SessionLocal
-    from .models import Tenant
-    db = SessionLocal()
-    try:
-        t = db.query(Tenant).first()
-        if not t:
-            return {"error": "nao encontrado"}
-        t.name = data["name"]
-        db.commit()
-        return {"success": True, "name": t.name}
-    finally:
-        db.close()
+    from .services.scheduler import send_expiry_warnings
+    await send_expiry_warnings()
+    return {"status": "ok"}
