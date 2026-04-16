@@ -1,11 +1,14 @@
 """
 whatsapp_webhook.py — Recebe mensagens WhatsApp via Evolution API.
 
+Payload confirmado: Formato 1 — body.data.key + body.data.message
+Keys: event, instance, data, destination, date_time, sender, server_url, apikey
+
 LGPD:
   - Mensagens nunca são logadas em texto plano
   - Endereços nunca aparecem em logs
-  - Cada tenant é isolado
-  - Histórico limitado a 20 mensagens, resetado após 24h
+  - Cada tenant é isolado — dados de um tenant nunca acessam outro
+  - Histórico limitado a 20 mensagens, resetado após 24h de inatividade
 """
 
 from fastapi import APIRouter, Request
@@ -27,130 +30,46 @@ import pytz
 router   = APIRouter()
 BRASILIA = pytz.timezone("America/Sao_Paulo")
 
-# Liga debug temporariamente para identificar o payload da Evolution
-# Mude para False após confirmar que está funcionando
-WA_DEBUG = os.getenv("WA_DEBUG", "true").lower() == "true"
-
 
 def _extract_message_data(body: dict) -> dict | None:
     """
-    Extrai dados da mensagem do payload da Evolution API.
-    Suporta múltiplos formatos de payload entre versões da Evolution.
-    Retorna None se não for uma mensagem de texto válida.
+    Extrai dados da mensagem do payload da Evolution API (Formato 1).
+    Retorna None se não for uma mensagem de texto válida para processar.
     """
     event = (body.get("event") or "").lower()
-
-    # Log de debug para identificar o formato do payload
-    if WA_DEBUG:
-        print(f"[WA DEBUG] event='{event}' | keys={list(body.keys())}")
-
-    # ── Verifica se é um evento de mensagem ───────────────────────────────────
-    # Evolution v1/v2: event = "messages.upsert"
-    # Evolution v2+: event pode vir capitalizado ou com variação
-    # Aceita qualquer evento que contenha "message" no nome
-    eventos_aceitos = {"messages.upsert", "message", "messages", "new_message"}
-    if event and event not in eventos_aceitos and "message" not in event:
-        if WA_DEBUG:
-            print(f"[WA DEBUG] evento '{event}' ignorado")
+    if "message" not in event:
         return None
 
-    # ── Tenta extrair dados da mensagem em múltiplos formatos ─────────────────
-
-    # Formato 1: Evolution padrão — body.data.key + body.data.message
     data = body.get("data") or {}
-    if isinstance(data, dict) and "key" in data:
-        key        = data.get("key", {})
-        remote_jid = key.get("remoteJid", "")
-        from_me    = key.get("fromMe", False)
-        message    = data.get("message", {})
-        push_name  = data.get("pushName", "") or data.get("pushname", "")
+    if not isinstance(data, dict) or "key" not in data:
+        return None
 
-        if WA_DEBUG:
-            print(f"[WA DEBUG] Formato 1 | fromMe={from_me} | jid={remote_jid} | msg_keys={list(message.keys()) if message else []}")
+    key        = data.get("key", {})
+    remote_jid = key.get("remoteJid", "")
+    from_me    = key.get("fromMe", False)
 
-        if from_me or "@g.us" in remote_jid:
-            return None
+    # Ignora mensagens enviadas pelo próprio bot e mensagens de grupos
+    if from_me or "@g.us" in remote_jid:
+        return None
 
-        text = (
-            message.get("conversation") or
-            message.get("extendedTextMessage", {}).get("text") or
-            message.get("imageMessage", {}).get("caption") or
-            ""
-        ).strip()
+    message = data.get("message", {})
+    text = (
+        message.get("conversation") or
+        message.get("extendedTextMessage", {}).get("text") or
+        message.get("imageMessage", {}).get("caption") or
+        ""
+    ).strip()
 
-        if text:
-            return {
-                "text":      text,
-                "phone":     remote_jid.replace("@s.whatsapp.net", ""),
-                "push_name": push_name,
-                "instance":  body.get("instance") or body.get("instanceName") or data.get("instance") or "",
-            }
+    if not text:
+        return None
 
-    # Formato 2: Evolution sem "data" — campos direto na raiz
-    if "key" in body:
-        key        = body.get("key", {})
-        remote_jid = key.get("remoteJid", "")
-        from_me    = key.get("fromMe", False)
-        message    = body.get("message", {})
-        push_name  = body.get("pushName", "") or body.get("pushname", "")
+    return {
+        "text":      text,
+        "phone":     remote_jid.replace("@s.whatsapp.net", ""),
+        "push_name": data.get("pushName", "") or data.get("pushname", ""),
+        "instance":  body.get("instance") or body.get("instanceName") or "",
+    }
 
-        if WA_DEBUG:
-            print(f"[WA DEBUG] Formato 2 | fromMe={from_me} | jid={remote_jid}")
-
-        if from_me or "@g.us" in remote_jid:
-            return None
-
-        text = (
-            message.get("conversation") or
-            message.get("extendedTextMessage", {}).get("text") or
-            ""
-        ).strip()
-
-        if text:
-            return {
-                "text":      text,
-                "phone":     remote_jid.replace("@s.whatsapp.net", ""),
-                "push_name": push_name,
-                "instance":  body.get("instance") or body.get("instanceName") or "",
-            }
-
-    # Formato 3: Evolution com messages array
-    messages = body.get("messages") or []
-    if isinstance(messages, list) and messages:
-        msg        = messages[0]
-        key        = msg.get("key", {})
-        remote_jid = key.get("remoteJid", "")
-        from_me    = key.get("fromMe", False)
-        message    = msg.get("message", {})
-        push_name  = msg.get("pushName", "") or msg.get("pushname", "")
-
-        if WA_DEBUG:
-            print(f"[WA DEBUG] Formato 3 | fromMe={from_me} | jid={remote_jid}")
-
-        if from_me or "@g.us" in remote_jid:
-            return None
-
-        text = (
-            message.get("conversation") or
-            message.get("extendedTextMessage", {}).get("text") or
-            ""
-        ).strip()
-
-        if text:
-            return {
-                "text":      text,
-                "phone":     remote_jid.replace("@s.whatsapp.net", ""),
-                "push_name": push_name,
-                "instance":  body.get("instance") or body.get("instanceName") or "",
-            }
-
-    if WA_DEBUG:
-        print(f"[WA DEBUG] Nenhum texto extraído | data_keys={list(data.keys()) if data else 'sem data'}")
-
-    return None
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def get_tenant_services(db, tenant_id: str) -> list:
     services = db.query(Service).filter(
@@ -253,8 +172,6 @@ def _find_tenant_for_whatsapp(db, instance_name: str):
     return None
 
 
-# ── Webhook ───────────────────────────────────────────────────────────────────
-
 @router.post("/whatsapp/webhook")
 async def whatsapp_webhook(request: Request):
     try:
@@ -262,7 +179,6 @@ async def whatsapp_webhook(request: Request):
     except Exception:
         return {"status": "invalid_json"}
 
-    # Extrai dados da mensagem com suporte a múltiplos formatos
     msg_data = _extract_message_data(body)
     if not msg_data:
         return {"status": "ignored"}
@@ -272,15 +188,10 @@ async def whatsapp_webhook(request: Request):
     push_name      = msg_data["push_name"]
     instance_name  = msg_data["instance"]
 
-    if WA_DEBUG:
-        print(f"[WA DEBUG] ✅ Mensagem extraída | instance={instance_name} | text_len={len(message_text)}")
-
     db = SessionLocal()
     try:
         tenant = _find_tenant_for_whatsapp(db, instance_name)
         if not tenant:
-            if WA_DEBUG:
-                print(f"[WA DEBUG] Tenant não encontrado para instance='{instance_name}'")
             return {"status": "tenant_not_found"}
 
         if not getattr(tenant, 'bot_active', True):
@@ -294,7 +205,6 @@ async def whatsapp_webhook(request: Request):
         tenant_config = get_tenant_config(tenant)
         services      = get_tenant_services(db, tenant.id)
 
-        # Busca ou cria cliente
         customer = db.query(Customer).filter(
             Customer.tenant_id == tenant.id,
             Customer.phone     == customer_phone
@@ -311,7 +221,6 @@ async def whatsapp_webhook(request: Request):
             customer.name = push_name
             db.commit()
 
-        # Busca ou cria conversa
         conversation = db.query(Conversation).filter(
             Conversation.tenant_id      == tenant.id,
             Conversation.customer_phone == customer_phone
@@ -324,7 +233,6 @@ async def whatsapp_webhook(request: Request):
             db.commit()
             db.refresh(conversation)
 
-        # Reset após 24h de inatividade
         if should_reset_conversation(conversation):
             conversation.messages = "[]"
             db.commit()
@@ -336,7 +244,6 @@ async def whatsapp_webhook(request: Request):
         if not customer_context.get("name") and push_name:
             customer_context["name"] = push_name
 
-        # Chama IA
         ai_response = chat_with_ai(
             history, message_text, customer_context,
             tenant_config=tenant_config,
@@ -345,10 +252,6 @@ async def whatsapp_webhook(request: Request):
         action     = ai_response.get("action", "reply")
         reply_text = ""
 
-        if WA_DEBUG:
-            print(f"[WA DEBUG] IA action='{action}'")
-
-        # ── check_availability ────────────────────────────────────────────────
         if action == "check_availability":
             date_str = ai_response.get("date", "")
             check    = check_business_hours_dynamic(tenant_config, date_str)
@@ -379,7 +282,6 @@ async def whatsapp_webhook(request: Request):
                 else:
                     reply_text = format_slots_for_ai(slots, date_str)
 
-        # ── create_appointment ────────────────────────────────────────────────
         elif action == "create_appointment":
             service_key = ai_response.get("service", "")
             svc_data    = find_service_by_key(services, service_key)
@@ -450,7 +352,6 @@ async def whatsapp_webhook(request: Request):
                     else:
                         reply_text = f"😕 Não consegui confirmar esse horário ({result['error']}). Vamos tentar outro?"
 
-        # ── list_appointments ─────────────────────────────────────────────────
         elif action == "list_appointments":
             appointments = get_customer_appointments(db, tenant.id, customer.id)
             if not appointments:
@@ -464,7 +365,6 @@ async def whatsapp_webhook(request: Request):
                     reply_text += "\n"
                 reply_text += "\nPara cancelar, me diga o número."
 
-        # ── cancel_appointment ────────────────────────────────────────────────
         elif action == "cancel_appointment":
             idx          = ai_response.get("appointment_index", 1) - 1
             appointments = get_customer_appointments(db, tenant.id, customer.id)
@@ -480,11 +380,9 @@ async def whatsapp_webhook(request: Request):
                 else:
                     reply_text = f"Não consegui cancelar: {result['error']}"
 
-        # ── reply ─────────────────────────────────────────────────────────────
         else:
             reply_text = ai_response.get("message", "Desculpe, não entendi. Pode repetir?")
 
-        # ── Segunda chamada à IA para slots ───────────────────────────────────
         if reply_text.startswith("__SLOT_OK__"):
             parts      = reply_text.split("__")
             slot_time  = parts[2]
@@ -511,7 +409,6 @@ async def whatsapp_webhook(request: Request):
             ai2        = chat_with_ai(history, slot_msg, customer_context, tenant_config, services)
             reply_text = ai2.get("message", f"Ops! O horário das {slot_time} está ocupado. Temos {sugestoes} disponíveis. Qual prefere?")
 
-        # Atualiza histórico e envia
         history.append({"role": "user",      "content": message_text})
         history.append({"role": "assistant", "content": reply_text})
         conversation.messages = json.dumps(history[-20:])
@@ -521,7 +418,7 @@ async def whatsapp_webhook(request: Request):
         return {"status": "ok"}
 
     except Exception as e:
-        print(f"[WhatsApp] ❌ Erro inesperado: {e}")
+        print(f"[WhatsApp] ❌ Erro: {e}")
         return {"status": "error"}
     finally:
         db.close()
