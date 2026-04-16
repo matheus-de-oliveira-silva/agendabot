@@ -1,3 +1,16 @@
+"""
+setup.py — Wizard de onboarding do BotGen.
+
+Correções v2:
+- Rebranding: AgendaBot → BotGen
+- setup_token NÃO é zerado após conclusão (admin precisa ver o link no painel)
+- _get_tenant_by_token não filtra setup_done — permite reabrir setup
+- Passo 4 (WhatsApp) é OPCIONAL — cliente pode pular e aguardar suporte
+- bot_active = True APENAS se phone_number_id estiver configurado
+- setup_done = True sempre ao concluir (independente do WhatsApp)
+- Mensagem clara na tela final sobre próximo passo se WhatsApp não configurado
+"""
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
@@ -9,6 +22,7 @@ router = APIRouter()
 
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
+APP_URL           = os.getenv("APP_URL", "")
 
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
@@ -20,13 +34,13 @@ ADDRESS_LABELS = [
 ]
 
 BUSINESS_TYPES = {
-    "petshop":   {"label": "🐾 Pet Shop",             "subject": "Pet",     "subject_plural": "Pets",     "icon": "🐾", "needs_address_suggest": True},
-    "clinica":   {"label": "🏥 Clínica Veterinária",  "subject": "Animal",  "subject_plural": "Animais",  "icon": "🏥", "needs_address_suggest": False},
-    "adocao":    {"label": "🐶 Clínica de Adoção",    "subject": "Animal",  "subject_plural": "Animais",  "icon": "🐶", "needs_address_suggest": False},
-    "barbearia": {"label": "💈 Barbearia",             "subject": "Cliente", "subject_plural": "Clientes", "icon": "💈", "needs_address_suggest": False},
-    "salao":     {"label": "💅 Salão de Beleza",       "subject": "Cliente", "subject_plural": "Clientes", "icon": "💅", "needs_address_suggest": False},
-    "estetica":  {"label": "✨ Estética",              "subject": "Cliente", "subject_plural": "Clientes", "icon": "✨", "needs_address_suggest": False},
-    "outro":     {"label": "⚙️ Outro",                "subject": "Cliente", "subject_plural": "Clientes", "icon": "⚙️", "needs_address_suggest": False},
+    "petshop":   {"label": "🐾 Pet Shop",            "subject": "Pet",     "subject_plural": "Pets",     "icon": "🐾", "needs_address_suggest": True},
+    "clinica":   {"label": "🏥 Clínica Veterinária", "subject": "Animal",  "subject_plural": "Animais",  "icon": "🏥", "needs_address_suggest": False},
+    "adocao":    {"label": "🐶 Clínica de Adoção",   "subject": "Animal",  "subject_plural": "Animais",  "icon": "🐶", "needs_address_suggest": False},
+    "barbearia": {"label": "💈 Barbearia",            "subject": "Cliente", "subject_plural": "Clientes", "icon": "💈", "needs_address_suggest": False},
+    "salao":     {"label": "💅 Salão de Beleza",      "subject": "Cliente", "subject_plural": "Clientes", "icon": "💅", "needs_address_suggest": False},
+    "estetica":  {"label": "✨ Estética",             "subject": "Cliente", "subject_plural": "Clientes", "icon": "✨", "needs_address_suggest": False},
+    "outro":     {"label": "⚙️ Outro",               "subject": "Cliente", "subject_plural": "Clientes", "icon": "⚙️", "needs_address_suggest": False},
 }
 
 SERVICOS_PADRAO = {
@@ -39,7 +53,9 @@ SERVICOS_PADRAO = {
     "outro":     [("Serviço Padrão",60,10000,"#6C5CE7","Descreva seu serviço")],
 }
 
-# ─── CSS base ─────────────────────────────────────────────────────────────────
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
 SETUP_STYLE = """
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
@@ -54,20 +70,22 @@ body{font-family:'DM Sans',sans-serif;background:#0f1117;color:#e8eaf2;min-heigh
 label{display:block;font-size:11px;font-weight:600;color:#9aa0b8;margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
 input,select,textarea{width:100%;padding:10px 12px;border:1px solid #2d3148;border-radius:10px;background:#0f1117;color:#e8eaf2;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s}
 input:focus,select:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
-.btn{padding:10px 22px;border-radius:10px;border:none;cursor:pointer;font-size:14px;font-weight:700;font-family:'DM Sans',sans-serif;transition:all .15s}
+.btn{padding:10px 22px;border-radius:10px;border:none;cursor:pointer;font-size:14px;font-weight:700;font-family:'DM Sans',sans-serif;transition:all .15s;display:inline-block;text-decoration:none;text-align:center}
 .btn-primary{background:#5B5BD6;color:#fff}.btn-primary:hover{background:#7c7de8}
 .btn-success{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}.btn-success:hover{background:#243d24}
 .btn-outline{background:transparent;color:#9aa0b8;border:1px solid #2d3148}.btn-outline:hover{border-color:#7c7de8;color:#7c7de8}
 .btn-danger{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}
+.btn-warn{background:#2a2200;color:#f6c90e;border:1px solid rgba(246,201,14,.2)}.btn-warn:hover{background:#3a3000}
 .btn-sm{padding:6px 14px;font-size:12px;border-radius:8px}
 .btn-full{width:100%;padding:13px}
 .form-group{margin-bottom:16px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .divider{height:1px;background:#2d3148;margin:20px 0}
-.alert{padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px}
+.alert{padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px;line-height:1.6}
 .alert-success{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}
 .alert-error{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}
 .alert-info{background:#1a1d3a;color:#a29bfe;border:1px solid rgba(162,155,254,.2)}
+.alert-warn{background:#2a2200;color:#f6c90e;border:1px solid rgba(246,201,14,.2)}
 .steps{display:flex;align-items:center;gap:0;margin-bottom:32px}
 .step-item{display:flex;flex-direction:column;align-items:center;flex:1}
 .step-circle{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;border:2px solid #2d3148;background:#0f1117;color:#9aa0b8;transition:all .3s}
@@ -92,13 +110,12 @@ input:focus,select:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
 .conn-loading{background:#1a1d3a;color:#a29bfe;border:1px solid #2d3148}
 .conn-ok{background:#1a2e1a;color:#68d391;border:1px solid rgba(104,211,145,.2)}
 .conn-fail{background:#2d1515;color:#fc8181;border:1px solid rgba(252,129,129,.2)}
-.check-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #2d3148}
+.check-row{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid #2d3148}
 .check-row:last-child{border-bottom:none}
-.check-icon{font-size:18px;width:28px;text-align:center;flex-shrink:0}
+.check-icon{font-size:18px;width:28px;text-align:center;flex-shrink:0;margin-top:1px}
 .check-label{font-size:14px;font-weight:600}
 .check-sub{font-size:12px;color:#9aa0b8;margin-top:2px}
 .pw-strength{height:4px;border-radius:2px;margin-top:6px;transition:all .3s}
-/* Passo 0 — seleção de tipo */
 .biz-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
 .biz-card{padding:16px;border:2px solid #2d3148;border-radius:12px;background:#0f1117;cursor:pointer;text-align:center;transition:all .2s}
 .biz-card:hover{border-color:#7c7de8;background:#23254a}
@@ -109,8 +126,8 @@ input:focus,select:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
 </style>
 """
 
+
 def _steps_html(current: int) -> str:
-    # Agora temos 6 passos (0 a 5, exibidos como 1 a 6)
     labels = ["Negócio", "Dados", "Horários", "Serviços", "WhatsApp", "Finalizar"]
     items = ""
     for i, label in enumerate(labels, 1):
@@ -127,26 +144,40 @@ def _steps_html(current: int) -> str:
             items += f'<div class="step-line {line_cls}"></div>'
     return f'<div class="steps">{items}</div>'
 
+
 def _get_tenant_by_token(token: str, db: Session):
+    """
+    FIX: Não filtra por setup_done — permite reabrir o setup.
+    O admin pode regenerar o token via /admin/tenant/{id}/resend-setup,
+    que seta setup_done=False, permitindo o cliente refazer o wizard.
+    """
     if not token:
         return None
-    return db.query(Tenant).filter(Tenant.setup_token == token, Tenant.setup_done == False).first()
+    return db.query(Tenant).filter(Tenant.setup_token == token).first()
+
+
+def _get_base_url(request: Request) -> str:
+    if APP_URL:
+        return APP_URL.rstrip("/")
+    proto = request.headers.get("x-forwarded-proto", "https")
+    host  = request.headers.get("host", "")
+    return f"{proto}://{host}"
+
 
 def _error_page(msg: str) -> HTMLResponse:
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Erro — Setup AgendaBot</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<title>Erro — BotGen Setup</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container" style="max-width:480px">
 <div class="card" style="text-align:center;padding:40px 28px">
 <div style="font-size:40px;margin-bottom:16px">⚠️</div>
 <div style="font-size:18px;font-weight:800;margin-bottom:10px">Link inválido</div>
 <div style="font-size:14px;color:#9aa0b8;line-height:1.7">{msg}</div>
+<div style="font-size:13px;color:#9aa0b8;margin-top:16px">Se precisar de um novo link, entre em contato com o suporte.</div>
 </div></div></body></html>""", status_code=400)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASSO 0 — Escolha do tipo de negócio (NOVO)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── PASSO 0 — Tipo de negócio ─────────────────────────────────────────────────
 
 @router.get("/setup", response_class=HTMLResponse)
 def setup_step0(request: Request, token: str = "", db: Session = Depends(get_db)):
@@ -154,44 +185,52 @@ def setup_step0(request: Request, token: str = "", db: Session = Depends(get_db)
         return _error_page("Nenhum token fornecido. Verifique o link que você recebeu.")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Este link é inválido ou já foi utilizado. Entre em contato com o suporte.")
+        return _error_page("Este link é inválido. Entre em contato com o suporte para receber um novo link.")
+
+    # Se já concluiu o setup, mostra aviso mas não bloqueia
+    already_done = getattr(tenant, 'setup_done', False)
+    done_banner  = ""
+    if already_done:
+        base_url      = _get_base_url(request)
+        dashboard_url = f"{base_url}/dashboard?tid={tenant.id}"
+        done_banner   = f"""<div class="alert alert-warn" style="margin-bottom:20px">
+            ⚠️ Você já concluiu o setup anteriormente. Se quiser reconfigurar algo, pode continuar abaixo.
+            Ou <a href="{dashboard_url}" style="color:#f6c90e;font-weight:700">acesse seu painel aqui</a>.
+        </div>"""
 
     biz_cards = ""
+    selected_biz = tenant.business_type or ""
     for key, info in BUSINESS_TYPES.items():
+        selected_cls = "selected" if key == selected_biz else ""
         biz_cards += f"""
-        <div class="biz-card" id="biz-{key}" onclick="selectBiz('{key}')">
+        <div class="biz-card {selected_cls}" id="biz-{key}" onclick="selectBiz('{key}')">
             <div class="biz-icon">{info['icon']}</div>
             <div class="biz-label">{info['label']}</div>
         </div>"""
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 1</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
 {_steps_html(1)}
-
+{done_banner}
 <div class="card">
-  <div class="card-title">👋 Bem-vindo ao AgendaBot!</div>
+  <div class="card-title">👋 Bem-vindo ao BotGen!</div>
   <div class="card-sub">Vamos configurar seu bot em poucos minutos. Primeiro, qual é o tipo do seu negócio?</div>
-
   <form method="POST" action="/setup/step0?token={token}">
     <input type="hidden" name="token" value="{token}">
-    <input type="hidden" name="business_type" id="biz_type_val" value="">
-
+    <input type="hidden" name="business_type" id="biz_type_val" value="{selected_biz}">
     <div class="biz-grid">{biz_cards}</div>
-
     <div id="biz-error" style="display:none;margin-top:12px" class="alert alert-error">
       Por favor, selecione o tipo do seu negócio.
     </div>
-
     <button type="button" onclick="submitStep0()" class="btn btn-primary btn-full" style="margin-top:20px">
       Próximo →
     </button>
   </form>
 </div>
 </div>
-
 <script>
 function selectBiz(key) {{
   document.querySelectorAll('.biz-card').forEach(c => c.classList.remove('selected'));
@@ -210,85 +249,74 @@ function submitStep0() {{
 
 @router.post("/setup/step0")
 async def setup_step0_post(request: Request, token: str = "", db: Session = Depends(get_db)):
-    form = await request.form()
-    token = token or form.get("token", "")
+    form   = await request.form()
+    token  = token or form.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
     biz_type = form.get("business_type", "outro")
     if biz_type not in BUSINESS_TYPES:
         biz_type = "outro"
 
-    info = BUSINESS_TYPES[biz_type]
-
-    # Atualiza o tenant com o tipo escolhido e dados padrão do tipo
+    info                        = BUSINESS_TYPES[biz_type]
     tenant.business_type        = biz_type
     tenant.tenant_icon          = info["icon"]
     tenant.subject_label        = info["subject"]
     tenant.subject_label_plural = info["subject_plural"]
 
-    # Remove serviço placeholder e adiciona serviços padrão do tipo
+    # Remove serviços anteriores e adiciona padrão do tipo
     db.query(Service).filter(Service.tenant_id == tenant.id).delete()
     for nome, dur, preco, cor, desc in SERVICOS_PADRAO.get(biz_type, SERVICOS_PADRAO["outro"]):
         db.add(Service(
             tenant_id=tenant.id, name=nome, duration_min=dur,
             price=preco, color=cor, description=desc, active=True
         ))
-
     db.commit()
     return RedirectResponse(f"/setup/step1?token={token}", status_code=302)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASSO 1 — Confirmar nome do negócio e atendente
-# ─────────────────────────────────────────────────────────────────────────────
+# ── PASSO 1 — Dados do negócio ────────────────────────────────────────────────
 
 @router.get("/setup/step1", response_class=HTMLResponse)
 def setup_step1(request: Request, token: str = "", db: Session = Depends(get_db)):
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
-    display  = tenant.display_name or tenant.name or ""
+    display   = tenant.display_name or tenant.name or ""
     attendant = getattr(tenant, 'bot_attendant_name', 'Mari') or 'Mari'
     biz_name  = getattr(tenant, 'bot_business_name', '') or display
     biz_label = BUSINESS_TYPES.get(tenant.business_type or "outro", {}).get("label", "Negócio")
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 2</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
 {_steps_html(2)}
-
 <div class="card">
   <div class="card-title">🏢 Dados do negócio</div>
-  <div class="card-sub">Tipo selecionado: <strong style="color:#7c7de8">{biz_label}</strong> — confirme as informações abaixo.</div>
-
+  <div class="card-sub">Tipo: <strong style="color:#7c7de8">{biz_label}</strong> — confirme as informações abaixo.</div>
   <form method="POST" action="/setup/step1?token={token}">
     <input type="hidden" name="token" value="{token}">
-
     <div class="form-group">
       <label>Nome do estabelecimento *</label>
       <input name="display_name" value="{display}" required placeholder="Ex: Barbearia do João">
       <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Como aparece para os clientes no WhatsApp</div>
     </div>
-
     <div class="form-group">
       <label>Nome da atendente virtual *</label>
       <input name="bot_attendant_name" value="{attendant}" required placeholder="Ex: Mari, Ana, Luna...">
       <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Nome da IA que conversa com seus clientes</div>
     </div>
-
     <div class="form-group">
-      <label>Nome do negócio que a atendente usa nas mensagens</label>
+      <label>Nome do negócio nas mensagens</label>
       <input name="bot_business_name" value="{biz_name}" placeholder="Ex: Barbearia do João">
-      <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Ex: "Olá! Sou a Mari da <strong>Barbearia do João</strong>"</div>
+      <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Usado pela IA: "Sou a Mari da <strong>{biz_name or 'seu negócio'}</strong>"</div>
     </div>
-
     <div style="display:flex;gap:10px">
-      <a href="/setup?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
+      <a href="/setup?token={token}" class="btn btn-outline" style="flex:1">← Voltar</a>
       <button type="submit" class="btn btn-primary" style="flex:2">Próximo →</button>
     </div>
   </form>
@@ -298,102 +326,83 @@ def setup_step1(request: Request, token: str = "", db: Session = Depends(get_db)
 
 @router.post("/setup/step1")
 async def setup_step1_post(request: Request, token: str = "", db: Session = Depends(get_db)):
-    form = await request.form()
-    token = token or form.get("token", "")
+    form   = await request.form()
+    token  = token or form.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
     tenant.display_name       = form.get("display_name", "").strip() or tenant.display_name
-    tenant.bot_attendant_name = form.get("bot_attendant_name", "Mari").strip()
+    tenant.bot_attendant_name = form.get("bot_attendant_name", "Mari").strip() or "Mari"
     tenant.bot_business_name  = form.get("bot_business_name", "").strip() or tenant.display_name
     db.commit()
     return RedirectResponse(f"/setup/step2?token={token}", status_code=302)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASSO 2 — Horários, dias e toggle de endereço
-# ─────────────────────────────────────────────────────────────────────────────
+# ── PASSO 2 — Horários e endereço ─────────────────────────────────────────────
 
 @router.get("/setup/step2", response_class=HTMLResponse)
 def setup_step2(request: Request, token: str = "", db: Session = Depends(get_db)):
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
-    open_days_list    = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
-    days_btns         = ''.join(
+    open_days_list = [d.strip() for d in (getattr(tenant, 'open_days', '0,1,2,3,4,5') or '0,1,2,3,4,5').split(',')]
+    days_btns      = ''.join(
         f'<button type="button" class="day-btn {"active" if str(i) in open_days_list else ""}" data-day="{i}" onclick="toggleDay(this)">{d}</button>'
         for i, d in enumerate(DAYS_PT)
     )
-    open_time         = getattr(tenant, 'open_time', '09:00') or '09:00'
-    close_time        = getattr(tenant, 'close_time', '18:00') or '18:00'
-    needs_address     = getattr(tenant, 'needs_address', False)
-    current_label     = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
-    na_checked        = 'checked' if needs_address else ''
-    addr_display      = 'block' if needs_address else 'none'
-    addr_opts         = ''.join(f'<option value="{l}" {"selected" if l == current_label else ""}>{l}</option>' for l in ADDRESS_LABELS)
-
-    # Sugere toggle de endereço para petshop
-    biz_type          = tenant.business_type or "outro"
-    addr_suggest      = BUSINESS_TYPES.get(biz_type, {}).get("needs_address_suggest", False)
-    suggest_html      = ""
+    open_time      = getattr(tenant, 'open_time',  '09:00') or '09:00'
+    close_time     = getattr(tenant, 'close_time', '18:00') or '18:00'
+    needs_address  = getattr(tenant, 'needs_address', False)
+    current_label  = getattr(tenant, 'address_label', 'Endereço de busca') or 'Endereço de busca'
+    na_checked     = 'checked' if needs_address else ''
+    addr_display   = 'block' if needs_address else 'none'
+    addr_opts      = ''.join(f'<option value="{l}" {"selected" if l == current_label else ""}>{l}</option>' for l in ADDRESS_LABELS)
+    biz_type       = tenant.business_type or "outro"
+    addr_suggest   = BUSINESS_TYPES.get(biz_type, {}).get("needs_address_suggest", False)
+    suggest_html   = ""
     if addr_suggest and not needs_address:
-        suggest_html = '<div class="alert alert-info" style="margin-bottom:12px">💡 Pet shops geralmente oferecem serviço de busca e entrega. Ative abaixo se for o seu caso!</div>'
+        suggest_html = '<div class="alert alert-info" style="margin-bottom:12px">💡 Pet shops geralmente fazem busca e entrega. Ative abaixo se for o seu caso!</div>'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 3</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
 {_steps_html(3)}
-
 <div class="card">
   <div class="card-title">⏰ Horário de funcionamento</div>
   <div class="card-sub">Configure os dias e horários em que seu negócio atende.</div>
-
   <form method="POST" action="/setup/step2?token={token}">
     <input type="hidden" name="token" value="{token}">
-
     <div class="form-group">
       <label>Dias de atendimento</label>
       <div class="days-grid" id="days-grid">{days_btns}</div>
       <input type="hidden" name="open_days" id="open_days_val" value="{','.join(open_days_list)}">
     </div>
-
     <div class="grid2">
-      <div class="form-group">
-        <label>Abre às</label>
-        <input name="open_time" type="time" value="{open_time}">
-      </div>
-      <div class="form-group">
-        <label>Fecha às</label>
-        <input name="close_time" type="time" value="{close_time}">
-      </div>
+      <div class="form-group"><label>Abre às</label><input name="open_time" type="time" value="{open_time}"></div>
+      <div class="form-group"><label>Fecha às</label><input name="close_time" type="time" value="{close_time}"></div>
     </div>
-
     <div class="divider"></div>
     <div style="font-size:13px;font-weight:700;margin-bottom:12px">📍 Coleta de endereço</div>
     {suggest_html}
-
     <div class="form-group">
       <label class="toggle-switch">
         <input type="checkbox" name="needs_address" value="1" id="needs_addr_cb" {na_checked} onchange="toggleAddr(this.checked)">
         <span class="slider"></span>
         <span style="font-size:13px;color:#e8eaf2;font-weight:600">Meu negócio busca ou entrega no endereço do cliente</span>
       </label>
-      <div style="font-size:12px;color:#9aa0b8;margin-top:8px;margin-left:54px">Ativa quando você tem pet shop com busca, delivery, etc.</div>
     </div>
-
     <div id="addr-label-wrap" style="display:{addr_display}">
       <div class="form-group">
         <label>Como chamar o campo de endereço</label>
         <select name="address_label">{addr_opts}</select>
       </div>
     </div>
-
     <div style="display:flex;gap:10px;margin-top:8px">
-      <a href="/setup/step1?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
+      <a href="/setup/step1?token={token}" class="btn btn-outline" style="flex:1">← Voltar</a>
       <button type="submit" class="btn btn-primary" style="flex:2">Próximo →</button>
     </div>
   </form>
@@ -414,11 +423,11 @@ function toggleAddr(checked) {{
 
 @router.post("/setup/step2")
 async def setup_step2_post(request: Request, token: str = "", db: Session = Depends(get_db)):
-    form = await request.form()
-    token = token or form.get("token", "")
+    form   = await request.form()
+    token  = token or form.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
     tenant.open_days     = form.get("open_days", "0,1,2,3,4,5")
     tenant.open_time     = form.get("open_time", "09:00")
@@ -429,26 +438,23 @@ async def setup_step2_post(request: Request, token: str = "", db: Session = Depe
     return RedirectResponse(f"/setup/step3?token={token}", status_code=302)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASSO 3 — Serviços (add / remove inline)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── PASSO 3 — Serviços ────────────────────────────────────────────────────────
 
 @router.get("/setup/step3", response_class=HTMLResponse)
 def setup_step3(request: Request, token: str = "", db: Session = Depends(get_db)):
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
-    services = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).all()
-
-    # Limite de serviços por plano
-    plano = getattr(tenant, 'plan', 'basico') or 'basico'
-    limite = 7 if plano == 'basico' else 999
+    services  = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).all()
+    plano     = getattr(tenant, 'plan', 'basico') or 'basico'
+    limite    = 7 if plano == 'basico' else 999
     qtd_atual = len(services)
+
     limite_html = ""
     if plano == 'basico':
         cor = "#fc8181" if qtd_atual >= limite else "#9aa0b8"
-        limite_html = f'<div style="font-size:12px;color:{cor};margin-bottom:12px">Plano Básico: {qtd_atual}/{limite} serviços. {"⚠️ Limite atingido — faça upgrade para adicionar mais." if qtd_atual >= limite else ""}</div>'
+        limite_html = f'<div style="font-size:12px;color:{cor};margin-bottom:12px">Plano Básico: {qtd_atual}/{limite} serviços. {"⚠️ Limite atingido." if qtd_atual >= limite else ""}</div>'
 
     svc_rows = ""
     for s in services:
@@ -466,75 +472,57 @@ def setup_step3(request: Request, token: str = "", db: Session = Depends(get_db)
         </div>"""
 
     if not svc_rows:
-        svc_rows = '<div style="color:#9aa0b8;font-size:13px;text-align:center;padding:18px 0">Nenhum serviço cadastrado ainda.</div>'
+        svc_rows = '<div style="color:#9aa0b8;font-size:13px;text-align:center;padding:18px 0">Nenhum serviço cadastrado.</div>'
 
-    saved = request.query_params.get("saved") == "1"
-    alert = '<div class="alert alert-success">✅ Serviço adicionado!</div>' if saved else ""
+    saved      = request.query_params.get("saved") == "1"
+    alert      = '<div class="alert alert-success">✅ Serviço adicionado!</div>' if saved else ""
     limit_reached = qtd_atual >= limite
-    add_form_display = 'none' if limit_reached else 'block'
+    add_display   = 'none' if limit_reached else 'block'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 4</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
 {_steps_html(4)}
-
 <div class="card">
   <div class="card-title">✂️ Serviços oferecidos</div>
-  <div class="card-sub">Cadastre os serviços que seu negócio oferece. O bot vai usar essas informações para apresentar opções aos clientes.</div>
-
+  <div class="card-sub">Cadastre os serviços que seu negócio oferece. O bot usa essas informações para apresentar opções aos clientes.</div>
   {alert}
   {limite_html}
-
   <div id="svc-list">{svc_rows}</div>
-
-  <div id="add-form" style="display:{add_form_display}">
+  <div id="add-form" style="display:{add_display}">
     <div class="divider"></div>
     <div style="font-size:13px;font-weight:700;margin-bottom:14px">Adicionar serviço</div>
     <form method="POST" action="/setup/step3/add?token={token}">
       <input type="hidden" name="token" value="{token}">
       <div class="grid2">
-        <div class="form-group">
-          <label>Nome do serviço *</label>
-          <input name="name" placeholder="Ex: Corte + Barba" required>
-        </div>
-        <div class="form-group">
-          <label>Duração (minutos)</label>
-          <input name="duration_min" type="number" value="60" min="5" max="480">
-        </div>
+        <div class="form-group"><label>Nome *</label><input name="name" placeholder="Ex: Corte + Barba" required></div>
+        <div class="form-group"><label>Duração (min)</label><input name="duration_min" type="number" value="60" min="5" max="480"></div>
       </div>
       <div class="grid2">
-        <div class="form-group">
-          <label>Preço (R$)</label>
-          <input name="price" type="number" step="0.01" placeholder="50.00">
-        </div>
-        <div class="form-group">
-          <label>Descrição (opcional)</label>
-          <input name="description" placeholder="Ex: Inclui lavagem e finalização">
-        </div>
+        <div class="form-group"><label>Preço (R$)</label><input name="price" type="number" step="0.01" placeholder="50.00"></div>
+        <div class="form-group"><label>Descrição (opcional)</label><input name="description" placeholder="Ex: Inclui lavagem"></div>
       </div>
       <button type="submit" class="btn btn-success btn-sm">+ Adicionar serviço</button>
     </form>
   </div>
 </div>
-
 <div style="display:flex;gap:10px">
-  <a href="/setup/step2?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
-  <a href="/setup/step4?token={token}" class="btn btn-primary" style="flex:2;text-align:center;display:flex;align-items:center;justify-content:center">Próximo →</a>
+  <a href="/setup/step2?token={token}" class="btn btn-outline" style="flex:1">← Voltar</a>
+  <a href="/setup/step4?token={token}" class="btn btn-primary" style="flex:2">Próximo →</a>
 </div>
 </div></body></html>""")
 
 
 @router.post("/setup/step3/add")
 async def setup_step3_add(request: Request, token: str = "", db: Session = Depends(get_db)):
-    form = await request.form()
-    token = token or form.get("token", "")
+    form   = await request.form()
+    token  = token or form.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
-    # Verifica limite de plano
     plano = getattr(tenant, 'plan', 'basico') or 'basico'
     if plano == 'basico':
         count = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).count()
@@ -543,19 +531,17 @@ async def setup_step3_add(request: Request, token: str = "", db: Session = Depen
 
     name = form.get("name", "").strip()
     if name:
-        try: price_cents = int(float(form.get("price", "0") or "0") * 100)
+        try:    price_cents = int(float(form.get("price", "0") or "0") * 100)
         except: price_cents = 0
-        try: duration = int(form.get("duration_min", "60") or "60")
+        try:    duration = int(form.get("duration_min", "60") or "60")
         except: duration = 60
 
         COLORS = ["#6C5CE7","#74b9ff","#00b894","#fd79a8","#f0a500","#a29bfe","#55efc4","#e17055"]
         count = db.query(Service).filter(Service.tenant_id == tenant.id).count()
-        color = COLORS[count % len(COLORS)]
-
         db.add(Service(
             tenant_id=tenant.id, name=name, duration_min=duration,
             price=price_cents, description=form.get("description", "").strip() or None,
-            color=color, active=True,
+            color=COLORS[count % len(COLORS)], active=True,
         ))
         db.commit()
 
@@ -564,10 +550,10 @@ async def setup_step3_add(request: Request, token: str = "", db: Session = Depen
 
 @router.post("/setup/step3/delete/{service_id}")
 def setup_step3_delete(service_id: str, request: Request, token: str = "", db: Session = Depends(get_db)):
-    token = token or request.query_params.get("token", "")
+    token  = token or request.query_params.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
     svc = db.query(Service).filter(Service.id == service_id, Service.tenant_id == tenant.id).first()
     if svc:
         db.delete(svc)
@@ -575,71 +561,70 @@ def setup_step3_delete(service_id: str, request: Request, token: str = "", db: S
     return RedirectResponse(f"/setup/step3?token={token}", status_code=302)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASSO 4 — Conectar WhatsApp via Evolution API + teste live
-# ─────────────────────────────────────────────────────────────────────────────
+# ── PASSO 4 — WhatsApp (OPCIONAL) ────────────────────────────────────────────
 
 @router.get("/setup/step4", response_class=HTMLResponse)
 def setup_step4(request: Request, token: str = "", db: Session = Depends(get_db)):
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
     current_instance = tenant.phone_number_id or ""
+    has_instance     = bool(current_instance)
+
+    configured_html = ""
+    if has_instance:
+        configured_html = f'<div class="alert alert-success" style="margin-bottom:16px">✅ Instância configurada: <strong>{current_instance}</strong></div>'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 5</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
 {_steps_html(5)}
-
 <div class="card">
   <div class="card-title">📱 Conectar WhatsApp</div>
-  <div class="card-sub">Informe o nome da instância da Evolution API que você criou para este negócio.</div>
+  <div class="card-sub">Se a sua instância já foi criada pelo suporte, informe o nome abaixo. Se ainda não foi, você pode pular esta etapa — o suporte vai configurar por você.</div>
+
+  {configured_html}
 
   <div class="alert alert-info" style="margin-bottom:20px">
-    💡 <strong>Não sabe o que é isso?</strong> Você precisa ter a Evolution API instalada e uma instância criada. Peça ajuda ao suporte ou assista ao tutorial em vídeo.
+    💡 <strong>Não sabe o nome da instância?</strong> Sem problema! Clique em "Pular por enquanto" abaixo — o suporte vai configurar o WhatsApp na chamada de ativação.
   </div>
 
   <div class="form-group">
-    <label>Nome da instância Evolution API *</label>
-    <input type="text" id="instance-input" value="{current_instance}" placeholder="Ex: barbearia-joao" oninput="resetStatus()">
-    <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Exatamente como foi criado no painel da Evolution API (sem espaços)</div>
+    <label>Nome da instância Evolution API (opcional agora)</label>
+    <input type="text" id="instance-input" value="{current_instance}" placeholder="Ex: barbearia-joao">
+    <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Exatamente como foi criado na Evolution (sem espaços). Deixe vazio se não souber.</div>
   </div>
 
-  <div id="conn-status" style="display:none" class="conn-status conn-loading">⏳ Verificando conexão...</div>
+  <div id="conn-status" style="display:none" class="conn-status conn-loading">⏳ Verificando...</div>
 
-  <div style="display:flex;gap:8px;margin-bottom:20px">
+  <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
     <button onclick="testConnection()" class="btn btn-outline btn-sm">🔍 Testar conexão</button>
   </div>
 
   <div class="divider"></div>
-  <div style="font-size:13px;font-weight:700;margin-bottom:14px">📋 Passos para conectar</div>
+  <div style="font-size:13px;font-weight:700;margin-bottom:14px">📋 Como conectar (o suporte pode fazer por você)</div>
   <div style="font-size:13px;color:#9aa0b8;line-height:1.8">
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">1. Acesse o painel da Evolution API no seu servidor</div>
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">2. Crie uma nova instância com um nome sem espaços (ex: <code style="color:#a29bfe;background:#1a1d27;padding:1px 5px;border-radius:4px">meu-petshop</code>)</div>
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">3. Escaneie o QR Code com o WhatsApp Business do seu negócio</div>
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">4. Aguarde aparecer "Connected" na Evolution</div>
-    <div style="padding:8px 0">5. Cole o nome da instância acima e clique em "Testar conexão"</div>
+    <div style="padding:8px 0;border-bottom:1px solid #2d3148">1. Acesse o painel da Evolution API</div>
+    <div style="padding:8px 0;border-bottom:1px solid #2d3148">2. Crie instância com nome sem espaços (ex: <code style="color:#a29bfe;background:#1a1d27;padding:1px 5px;border-radius:4px">meu-petshop</code>)</div>
+    <div style="padding:8px 0;border-bottom:1px solid #2d3148">3. Escaneie o QR Code com o WhatsApp Business do negócio</div>
+    <div style="padding:8px 0;border-bottom:1px solid #2d3148">4. Aguarde "Connected" na Evolution</div>
+    <div style="padding:8px 0">5. Cole o nome da instância acima e teste</div>
   </div>
 
   <div class="divider"></div>
-  <div style="display:flex;gap:10px;margin-top:8px">
-    <a href="/setup/step3?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
-    <button onclick="saveAndNext()" class="btn btn-primary" style="flex:2">Salvar e continuar →</button>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="/setup/step3?token={token}" class="btn btn-outline" style="flex:1;min-width:120px">← Voltar</a>
+    <button onclick="saveAndNext(false)" class="btn btn-warn" style="flex:1;min-width:140px">Pular por enquanto →</button>
+    <button onclick="saveAndNext(true)" class="btn btn-primary" style="flex:2;min-width:160px">Salvar e continuar →</button>
   </div>
 </div>
 </div>
 
 <script>
 const TOKEN = "{token}";
-let lastStatus = null;
-
-function resetStatus() {{
-  document.getElementById('conn-status').style.display = 'none';
-  lastStatus = null;
-}}
 
 async function testConnection() {{
   const instance = document.getElementById('instance-input').value.trim();
@@ -651,7 +636,6 @@ async function testConnection() {{
   try {{
     const res = await fetch(`/setup/test-whatsapp?token=${{TOKEN}}&instance=${{encodeURIComponent(instance)}}`);
     const data = await res.json();
-    lastStatus = data.status;
     if (data.status === 'connected') {{
       el.className = 'conn-status conn-ok';
       el.textContent = '✅ WhatsApp conectado com sucesso!';
@@ -668,13 +652,16 @@ async function testConnection() {{
   }}
 }}
 
-async function saveAndNext() {{
+async function saveAndNext(requireInstance) {{
   const instance = document.getElementById('instance-input').value.trim();
-  if (!instance) {{ alert('Informe o nome da instância antes de continuar.'); return; }}
+  if (requireInstance && !instance) {{
+    alert('Informe o nome da instância ou clique em "Pular por enquanto".');
+    return;
+  }}
   const res = await fetch(`/setup/step4/save?token=${{TOKEN}}`, {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{instance}})
+    body: JSON.stringify({{instance: instance || ''}})
   }});
   if (res.ok) {{
     window.location.href = `/setup/step5?token=${{TOKEN}}`;
@@ -695,7 +682,7 @@ async def test_whatsapp(token: str = "", instance: str = "", db: Session = Depen
     if not instance:
         return JSONResponse({"status": "error", "message": "Instância não informada"}, status_code=400)
     if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-        return JSONResponse({"status": "error", "message": "Evolution API não configurada no servidor"}, status_code=500)
+        return JSONResponse({"status": "error", "message": "Evolution API não configurada"}, status_code=500)
 
     url = f"{EVOLUTION_API_URL.rstrip('/')}/instance/connectionState/{instance}"
     try:
@@ -703,7 +690,7 @@ async def test_whatsapp(token: str = "", instance: str = "", db: Session = Depen
             resp = await client.get(url, headers={"apikey": EVOLUTION_API_KEY})
         if resp.status_code == 404:
             return JSONResponse({"status": "not_found"})
-        data = resp.json()
+        data  = resp.json()
         state = data.get("instance", {}).get("state", "") or data.get("state", "")
         if state in ("open", "connected"):
             return JSONResponse({"status": "connected"})
@@ -714,72 +701,60 @@ async def test_whatsapp(token: str = "", instance: str = "", db: Session = Depen
 
 @router.post("/setup/step4/save")
 async def setup_step4_save(request: Request, token: str = "", db: Session = Depends(get_db)):
-    token = token or request.query_params.get("token", "")
+    token  = token or request.query_params.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
         return JSONResponse({"error": "Token inválido"}, status_code=400)
 
-    body = await request.json()
+    body     = await request.json()
     instance = (body.get("instance") or "").strip()
-    if not instance:
-        return JSONResponse({"ok": True})
 
-    # Verifica se a instância já está em uso por outro tenant
-    existing = db.query(Tenant).filter(
-        Tenant.phone_number_id == instance,
-        Tenant.id != tenant.id
-    ).first()
-    if existing:
-        return JSONResponse(
-            {"error": f"A instância '{instance}' já está em uso por outro negócio. Use um nome diferente."},
-            status_code=409
-        )
+    if instance:
+        # Verifica se instância já está em uso por outro tenant
+        existing = db.query(Tenant).filter(
+            Tenant.phone_number_id == instance,
+            Tenant.id != tenant.id
+        ).first()
+        if existing:
+            return JSONResponse(
+                {"error": f"A instância '{instance}' já está em uso. Use um nome diferente."},
+                status_code=409
+            )
+        tenant.phone_number_id = instance
+    # Se vazio, mantém o que tinha (pode ser que o admin já configurou)
 
-    tenant.phone_number_id = instance
     try:
         db.commit()
     except Exception:
         db.rollback()
-        return JSONResponse({"error": "Erro ao salvar. Tente novamente."}, status_code=500)
+        return JSONResponse({"error": "Erro ao salvar."}, status_code=500)
 
     return JSONResponse({"ok": True})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASSO 5 — Checklist + criar senha + ativar bot
-# ─────────────────────────────────────────────────────────────────────────────
+# ── PASSO 5 — Resumo e criação de senha ──────────────────────────────────────
 
 @router.get("/setup/step5", response_class=HTMLResponse)
 def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)):
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
-    services  = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).count()
-    has_wa    = bool(tenant.phone_number_id)
-    has_svc   = services > 0
+    services = db.query(Service).filter(Service.tenant_id == tenant.id, Service.active == True).count()
+    has_wa   = bool(tenant.phone_number_id)
+    has_svc  = services > 0
 
     checks = [
-        ("✅" if (tenant.display_name or tenant.name) else "⚠️",
-         "Nome do negócio", tenant.display_name or tenant.name or "Não informado",
-         bool(tenant.display_name or tenant.name)),
-        ("✅" if getattr(tenant, 'open_days', None) else "⚠️",
-         "Horários configurados",
-         f"{getattr(tenant,'open_time','09:00')} às {getattr(tenant,'close_time','18:00')}",
-         bool(getattr(tenant, 'open_days', None))),
-        ("✅" if has_svc else "⚠️",
-         "Serviços cadastrados",
-         f"{services} serviço(s)" if has_svc else "Nenhum serviço cadastrado",
-         has_svc),
-        ("✅" if has_wa else "⚠️",
-         "WhatsApp conectado",
-         tenant.phone_number_id if has_wa else "Instância não configurada",
-         has_wa),
+        (bool(tenant.display_name or tenant.name), "Nome do negócio",    tenant.display_name or tenant.name or "Não informado"),
+        (bool(getattr(tenant,'open_days',None)),    "Horários",           f"{getattr(tenant,'open_time','09:00')} às {getattr(tenant,'close_time','18:00')}"),
+        (has_svc,                                   "Serviços",           f"{services} serviço(s)" if has_svc else "Nenhum serviço"),
+        (has_wa,                                    "WhatsApp",           tenant.phone_number_id if has_wa else "⚠️ Será configurado pelo suporte"),
     ]
 
     check_rows = ""
-    for icon, label, sub, ok in checks:
-        color = "#68d391" if ok else "#f6c90e"
+    for ok, label, sub in checks:
+        icon  = "✅" if ok else ("⚠️" if label == "WhatsApp" else "⬜")
+        color = "#68d391" if ok else ("#f6c90e" if label == "WhatsApp" else "#9aa0b8")
         check_rows += f"""
         <div class="check-row">
           <div class="check-icon">{icon}</div>
@@ -789,49 +764,57 @@ def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)
           </div>
         </div>"""
 
+    # Aviso se WhatsApp não configurado
+    wa_aviso = ""
+    if not has_wa:
+        wa_aviso = """<div class="alert alert-warn" style="margin-bottom:16px">
+            ⚠️ <strong>WhatsApp não configurado ainda.</strong> O bot vai ficar pausado até o suporte conectar o WhatsApp na chamada de ativação. Você pode finalizar o setup mesmo assim.
+        </div>"""
+
     error    = request.query_params.get("error", "")
     err_html = f'<div class="alert alert-error">{error}</div>' if error else ""
 
+    # Se já tem senha (setup sendo refeito), mostra aviso
+    has_pw = bool(getattr(tenant, 'dashboard_password', None))
+    pw_aviso = ""
+    if has_pw:
+        pw_aviso = '<div class="alert alert-info" style="margin-bottom:14px">💡 Você já tem uma senha cadastrada. Crie uma nova abaixo para substituir, ou deixe em branco para manter a atual.</div>'
+
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — Passo 6</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
 {_steps_html(6)}
-
 <div class="card">
   <div class="card-title">📋 Resumo da configuração</div>
-  <div class="card-sub">Verifique se tudo está correto antes de ativar o bot.</div>
+  <div class="card-sub">Verifique se tudo está correto antes de finalizar.</div>
   {check_rows}
 </div>
 
+{wa_aviso}
+
 <div class="card">
-  <div class="card-title">🔑 Criar senha do painel</div>
-  <div class="card-sub">Crie uma senha para acessar seu painel de agendamentos. Guarde em local seguro.</div>
-
+  <div class="card-title">🔑 {"Atualizar senha" if has_pw else "Criar senha do painel"}</div>
+  <div class="card-sub">{"Para acessar seu painel de agendamentos." if not has_pw else "Deixe em branco para manter a senha atual."}</div>
   {err_html}
-
+  {pw_aviso}
   <form method="POST" action="/setup/complete?token={token}">
     <input type="hidden" name="token" value="{token}">
-
     <div class="form-group">
-      <label>Nova senha *</label>
-      <input type="password" name="password" id="pw" placeholder="Mínimo 6 caracteres" required minlength="6" oninput="checkPw()">
+      <label>{"Nova senha" if not has_pw else "Nova senha (opcional)"} {"*" if not has_pw else ""}</label>
+      <input type="password" name="password" id="pw" placeholder="Mínimo 6 caracteres" {"required minlength='6'" if not has_pw else ""} oninput="checkPw()">
       <div class="pw-strength" id="pw-bar" style="background:#2d3148;width:0%"></div>
     </div>
-
-    <div class="form-group">
-      <label>Confirmar senha *</label>
-      <input type="password" name="password2" id="pw2" placeholder="Repita a senha" required minlength="6">
+    <div class="form-group" id="pw2-group">
+      <label>Confirmar senha {"*" if not has_pw else ""}</label>
+      <input type="password" name="password2" id="pw2" placeholder="Repita a senha" {"required minlength='6'" if not has_pw else ""}>
     </div>
-
-    <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px">🚀 Ativar bot e finalizar</button>
+    <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px">🚀 {"Ativar bot e finalizar" if not has_pw else "Salvar e finalizar"}</button>
   </form>
 </div>
 
-<div style="display:flex;gap:10px">
-  <a href="/setup/step4?token={token}" class="btn btn-outline" style="flex:1;text-align:center">← Voltar</a>
-</div>
+<a href="/setup/step4?token={token}" class="btn btn-outline">← Voltar</a>
 </div>
 
 <script>
@@ -839,8 +822,8 @@ function checkPw() {{
   const pw  = document.getElementById('pw').value;
   const bar = document.getElementById('pw-bar');
   let strength = 0;
-  if (pw.length >= 6)  strength++;
-  if (pw.length >= 10) strength++;
+  if (pw.length >= 6)   strength++;
+  if (pw.length >= 10)  strength++;
   if (/[A-Z]/.test(pw)) strength++;
   if (/[0-9]/.test(pw)) strength++;
   const colors = ['#fc8181','#f6c90e','#68d391','#00b894'];
@@ -854,35 +837,45 @@ function checkPw() {{
 
 @router.post("/setup/complete")
 async def setup_complete(request: Request, token: str = "", db: Session = Depends(get_db)):
-    form  = await request.form()
-    token = token or form.get("token", "")
+    form   = await request.form()
+    token  = token or form.get("token", "")
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
-        return _error_page("Link inválido ou expirado.")
+        return _error_page("Link inválido.")
 
     pw  = form.get("password", "").strip()
     pw2 = form.get("password2", "").strip()
+    has_existing_pw = bool(getattr(tenant, 'dashboard_password', None))
 
-    if len(pw) < 6:
-        return RedirectResponse(f"/setup/step5?token={token}&error=A+senha+deve+ter+ao+menos+6+caracteres.", status_code=302)
-    if pw != pw2:
-        return RedirectResponse(f"/setup/step5?token={token}&error=As+senhas+não+coincidem.", status_code=302)
+    # Se tem senha nova, valida
+    if pw:
+        if len(pw) < 6:
+            return RedirectResponse(f"/setup/step5?token={token}&error=A+senha+deve+ter+ao+menos+6+caracteres.", status_code=302)
+        if pw != pw2:
+            return RedirectResponse(f"/setup/step5?token={token}&error=As+senhas+não+coincidem.", status_code=302)
+        tenant.dashboard_password = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+    elif not has_existing_pw:
+        # Sem senha e sem senha existente — não pode prosseguir
+        return RedirectResponse(f"/setup/step5?token={token}&error=Crie+uma+senha+para+continuar.", status_code=302)
 
-    hashed = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
-    tenant.dashboard_password = hashed
     if not tenant.dashboard_token:
         tenant.dashboard_token = secrets.token_urlsafe(32)
-    tenant.bot_active  = True
-    tenant.setup_done  = True
-    tenant.setup_token = None
-    db.commit()
 
+    # FIX: bot_active = True APENAS se WhatsApp estiver configurado
+    # Se não tem instância, fica pausado até o admin ativar
+    has_wa = bool(tenant.phone_number_id)
+    tenant.bot_active = has_wa
+
+    # FIX: setup_done = True mas setup_token NÃO é zerado
+    # Admin precisa do token para exibir o link no painel
+    # Token é regenerado apenas quando admin clica em "Reenviar Setup"
+    tenant.setup_done = True
+
+    db.commit()
     return RedirectResponse(f"/setup/done?tid={tenant.id}", status_code=302)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DONE — Página de conclusão
-# ─────────────────────────────────────────────────────────────────────────────
+# ── DONE ─────────────────────────────────────────────────────────────────────
 
 @router.get("/setup/done", response_class=HTMLResponse)
 def setup_done(request: Request, tid: str = "", db: Session = Depends(get_db)):
@@ -890,31 +883,41 @@ def setup_done(request: Request, tid: str = "", db: Session = Depends(get_db)):
     if not tenant:
         return _error_page("Página não encontrada.")
 
-    base_url      = request.headers.get("x-forwarded-proto", "https") + "://" + request.headers.get("host", "")
+    base_url      = _get_base_url(request)
     dashboard_url = f"{base_url}/dashboard?tid={tenant.id}"
     display       = tenant.display_name or tenant.name
+    has_wa        = bool(tenant.phone_number_id)
+
+    # Mensagem diferente dependendo se WhatsApp foi configurado
+    if has_wa:
+        status_html = """
+        <div style="background:#1a2e1a;border:1px solid rgba(104,211,145,.2);border-radius:10px;padding:14px 16px;margin-bottom:20px;font-size:13px;color:#68d391">
+            ✅ Bot ativo! Seus clientes já podem agendar pelo WhatsApp. 🚀
+        </div>"""
+    else:
+        status_html = """
+        <div style="background:#2a2200;border:1px solid rgba(246,201,14,.2);border-radius:10px;padding:14px 16px;margin-bottom:20px;font-size:13px;color:#f6c90e;line-height:1.7">
+            ⚠️ <strong>Quase lá!</strong> Falta só conectar o WhatsApp.<br>
+            O suporte vai fazer isso na chamada de ativação — pode ficar tranquilo(a)!
+        </div>"""
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Setup concluído! 🎉</title>{SETUP_STYLE}</head><body>
-<div class="header"><div class="logo">🤖 AgendaBot Setup</div></div>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container" style="max-width:520px">
-
 <div class="card" style="text-align:center;padding:40px 28px">
   <div style="font-size:48px;margin-bottom:16px">🎉</div>
-  <div style="font-size:22px;font-weight:800;margin-bottom:8px">Tudo pronto!</div>
-  <div style="font-size:14px;color:#9aa0b8;line-height:1.7;margin-bottom:24px">
-    O AgendaBot do <strong style="color:#e8eaf2">{display}</strong> está configurado e ativo.<br>
-    Seus clientes já podem agendar pelo WhatsApp! 🚀
+  <div style="font-size:22px;font-weight:800;margin-bottom:8px">Configuração concluída!</div>
+  <div style="font-size:14px;color:#9aa0b8;line-height:1.7;margin-bottom:20px">
+    O BotGen do <strong style="color:#e8eaf2">{display}</strong> está configurado.
   </div>
-
+  {status_html}
   <div style="background:#0f1117;border:1px solid #2d3148;border-radius:10px;padding:16px;margin-bottom:20px;text-align:left">
     <div style="font-size:11px;color:#9aa0b8;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Seu painel de agendamentos</div>
     <div style="font-family:'DM Mono',monospace;font-size:13px;color:#7c7de8;word-break:break-all">{dashboard_url}</div>
   </div>
-
   <a href="{dashboard_url}" class="btn btn-primary btn-full">Acessar meu painel →</a>
   <div style="font-size:12px;color:#9aa0b8;margin-top:12px">Salve esse link nos seus favoritos!</div>
 </div>
-
 </div></body></html>""")

@@ -4,6 +4,11 @@ whatsapp_webhook.py — Recebe mensagens WhatsApp via Evolution API.
 Payload confirmado: Formato 1 — body.data.key + body.data.message
 Keys: event, instance, data, destination, date_time, sender, server_url, apikey
 
+Fix v2:
+  - notify_owner_new_appointment em try/catch — falha não impede resposta ao cliente
+  - Mensagens de erro ao cliente não expõem detalhes técnicos
+  - Rebranding interno: AgendaBot → BotGen
+
 LGPD:
   - Mensagens nunca são logadas em texto plano
   - Endereços nunca aparecem em logs
@@ -202,6 +207,10 @@ async def whatsapp_webhook(request: Request):
             )
             return {"status": "bot_inactive"}
 
+        # Verifica plano ativo
+        if not getattr(tenant, 'plan_active', True):
+            return {"status": "plan_suspended"}
+
         tenant_config = get_tenant_config(tenant)
         services      = get_tenant_services(db, tenant.id)
 
@@ -341,14 +350,18 @@ async def whatsapp_webhook(request: Request):
                                 f"Até lá! 😊"
                             )
 
-                        appt_obj = db.query(Appointment).filter(
-                            Appointment.id == result["appointment_id"]
-                        ).first()
-                        if appt_obj:
-                            await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
+                        # FIX: notify em try/catch — falha não impede resposta ao cliente
+                        try:
+                            appt_obj = db.query(Appointment).filter(
+                                Appointment.id == result["appointment_id"]
+                            ).first()
+                            if appt_obj:
+                                await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
+                        except Exception as notify_err:
+                            print(f"[WhatsApp] ⚠️ Notificação falhou (agendamento salvo): {notify_err}")
 
                         # LGPD: nunca loga endereço
-                        print(f"[Agendamento] criado | endereço: {'sim' if pickup_address else 'não'}")
+                        print(f"[Agendamento] criado | tenant={tenant.id[:8]} | endereço: {'sim' if pickup_address else 'não'}")
                     else:
                         print(f"[Agendamento] ERRO: {result['error']}")
                         reply_text = f"😕 Não consegui confirmar esse horário ({result['error']}). Vamos tentar outro?"
@@ -420,6 +433,8 @@ async def whatsapp_webhook(request: Request):
 
     except Exception as e:
         print(f"[WhatsApp] ❌ Erro: {e}")
+        import traceback
+        traceback.print_exc()
         return {"status": "error"}
     finally:
         db.close()
