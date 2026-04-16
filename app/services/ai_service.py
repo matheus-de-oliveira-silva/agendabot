@@ -1,15 +1,14 @@
 """
-ai_service.py — Motor de IA do AgendaBot.
+ai_service.py — Motor de IA do AgendaBot SaaS.
 
-Melhorias v2:
-- Tom e personalidade realmente adaptados por tipo de negócio
-- Resumo sem linha de pet para negócios que não precisam
-- Normalização de horário ("10h", "dez horas" → "10:00")
-- Feriados dinâmicos (ano atual + próximo)
-- max_tokens aumentado para 1400
-- Instrução para resolver serviço ambíguo
-- Confirmação de agendamento gerada pela IA (não hardcoded no webhook)
-- Contexto de cliente recorrente com personalização real
+v4 — Humanizacao total + fluxo a prova de erros:
+- Linguagem natural de WhatsApp com abreviacoes reais por tipo de negocio
+- Personalidades distintas e convincentes por segmento
+- Fluxo de confirmacao reforçado — create_appointment SEMPRE apos confirmacao
+- Coleta inteligente: nunca repete pergunta, agrupa quando possivel
+- Tratamento de clientes impacientes (mandam tudo de uma vez)
+- Recuperacao elegante de erros sem expor tecnicalidades
+- Compativel com multi-tenant SaaS (100% via tenant_config)
 """
 
 from openai import OpenAI
@@ -20,7 +19,7 @@ import pytz, os, json, re
 
 load_dotenv()
 
-client  = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client   = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 BRASILIA = pytz.timezone("America/Sao_Paulo")
 
 
@@ -28,104 +27,70 @@ def agora_brasilia() -> datetime:
     return datetime.now(BRASILIA).replace(tzinfo=None)
 
 
-# ── Feriados dinâmicos ────────────────────────────────────────────────────────
+# ── Feriados dinamicos ────────────────────────────────────────────────────────
 
 def _get_feriados() -> dict:
-    """
-    Retorna feriados nacionais fixos para o ano atual e o próximo.
-    Não depende de API externa — cobre os feriados de data fixa.
-    Carnaval e Corpus Christi são calculados com base na Páscoa.
-    """
     def easter(year: int) -> datetime:
-        # Algoritmo de Butcher para calcular a Páscoa
-        a = year % 19
-        b = year // 100
-        c = year % 100
-        d = b // 4
-        e = b % 4
-        f = (b + 8) // 25
-        g = (b - f + 1) // 3
-        h = (19 * a + b - d - g + 15) % 30
-        i = c // 4
-        k = c % 4
-        l = (32 + 2 * e + 2 * i - h - k) % 7
-        m = (a + 11 * h + 22 * l) // 451
-        month = (h + l - 7 * m + 114) // 31
-        day   = ((h + l - 7 * m + 114) % 31) + 1
+        a = year % 19; b = year // 100; c = year % 100
+        d = b // 4;  e = b % 4;  f = (b + 8) // 25
+        g = (b - f + 1) // 3;  h = (19*a + b - d - g + 15) % 30
+        i = c // 4;  k = c % 4; l = (32 + 2*e + 2*i - h - k) % 7
+        m = (a + 11*h + 22*l) // 451
+        month = (h + l - 7*m + 114) // 31
+        day   = ((h + l - 7*m + 114) % 31) + 1
         return datetime(year, month, day)
 
     feriados = {}
     for year in [datetime.now().year, datetime.now().year + 1]:
-        pascoa        = easter(year)
-        carnaval_seg  = pascoa - timedelta(days=48)
-        carnaval_ter  = pascoa - timedelta(days=47)
-        sexta_santa   = pascoa - timedelta(days=2)
-        corpus_christi = pascoa + timedelta(days=60)
-
-        fixos = [
-            f"{year}-01-01",  # Confraternização Universal
-            f"{year}-04-21",  # Tiradentes
-            f"{year}-05-01",  # Dia do Trabalho
-            f"{year}-09-07",  # Independência
-            f"{year}-10-12",  # N.Sra. Aparecida
-            f"{year}-11-02",  # Finados
-            f"{year}-11-15",  # Proclamação da República
-            f"{year}-12-25",  # Natal
-        ]
-        moveis = [
-            carnaval_seg.strftime("%Y-%m-%d"),
-            carnaval_ter.strftime("%Y-%m-%d"),
-            sexta_santa.strftime("%Y-%m-%d"),
-            pascoa.strftime("%Y-%m-%d"),
-            corpus_christi.strftime("%Y-%m-%d"),
-        ]
+        p  = easter(year)
+        cs = p - timedelta(days=48)
+        ct = p - timedelta(days=47)
+        ss = p - timedelta(days=2)
+        cc = p + timedelta(days=60)
         nomes = {
-            carnaval_seg.strftime("%Y-%m-%d"): "Carnaval (segunda)",
-            carnaval_ter.strftime("%Y-%m-%d"): "Carnaval (terça)",
-            sexta_santa.strftime("%Y-%m-%d"):  "Sexta-Feira Santa",
-            pascoa.strftime("%Y-%m-%d"):        "Páscoa",
-            corpus_christi.strftime("%Y-%m-%d"): "Corpus Christi",
+            cs.strftime("%Y-%m-%d"):  "Carnaval (seg)",
+            ct.strftime("%Y-%m-%d"):  "Carnaval (ter)",
+            ss.strftime("%Y-%m-%d"):  "Sexta Santa",
+            p.strftime("%Y-%m-%d"):   "Pascoa",
+            cc.strftime("%Y-%m-%d"):  "Corpus Christi",
             f"{year}-01-01": "Ano Novo",
             f"{year}-04-21": "Tiradentes",
             f"{year}-05-01": "Dia do Trabalho",
-            f"{year}-09-07": "Independência do Brasil",
-            f"{year}-10-12": "Nossa Sra. Aparecida",
+            f"{year}-09-07": "Independencia",
+            f"{year}-10-12": "N.Sra. Aparecida",
             f"{year}-11-02": "Finados",
-            f"{year}-11-15": "Proclamação da República",
+            f"{year}-11-15": "Proclamacao da Republica",
             f"{year}-12-25": "Natal",
         }
-        for d in fixos + moveis:
-            feriados[d] = nomes.get(d, "Feriado")
+        for d in nomes:
+            feriados[d] = nomes[d]
     return feriados
 
 FERIADOS = _get_feriados()
 
 
 def _build_feriados_prompt() -> str:
-    agora = agora_brasilia()
-    # Mostra apenas os próximos 90 dias para não poluir o prompt
+    agora  = agora_brasilia()
     limite = agora + timedelta(days=90)
     proximos = {
-        d: nome for d, nome in sorted(FERIADOS.items())
+        d: n for d, n in sorted(FERIADOS.items())
         if agora.strftime("%Y-%m-%d") <= d <= limite.strftime("%Y-%m-%d")
     }
     if not proximos:
         return "Nenhum feriado nos proximos 90 dias."
-    return "\n".join(f"  {d}: {nome}" for d, nome in proximos.items())
+    return "\n".join(f"  {d}: {n}" for d, n in proximos.items())
 
 
-# ── Helpers de prompt ─────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def build_services_prompt(services: list) -> str:
     if not services:
-        return "Nenhum servico cadastrado no momento."
+        return "Nenhum servico cadastrado."
     lines = []
     for s in services:
         price = f"R$ {s['price']/100:.2f}" if s.get("price") else "Gratis"
         desc  = f" | {s['description']}" if s.get("description") else ""
-        lines.append(
-            f'  chave="{s["key"]}" | nome="{s["name"]}" | {price} | {s["duration_min"]}min{desc}'
-        )
+        lines.append(f'  chave="{s["key"]}" | "{s["name"]}" | {price} | {s["duration_min"]}min{desc}')
     return "\n".join(lines)
 
 
@@ -148,7 +113,7 @@ def extract_json_object(text: str) -> Optional[str]:
     stack, in_str, esc = 0, False, False
     for i, ch in enumerate(text[start:], start):
         if in_str:
-            if esc:        esc = False
+            if esc:          esc = False
             elif ch == "\\": esc = True
             elif ch == '"':  in_str = False
         else:
@@ -161,147 +126,146 @@ def extract_json_object(text: str) -> Optional[str]:
     return None
 
 
-# ── Configuração por tipo de negócio ─────────────────────────────────────────
+# ── Personalidades por tipo de negocio ───────────────────────────────────────
 
 BUSINESS_CONFIG = {
     "petshop": {
         "emoji": "🐾",
         "personality": (
-            "Voce e calorosa, simpatica e visivelmente amante dos animais. "
-            "Fale como uma funcionaria do pet shop que conhece cada bichinho pelo nome. "
-            "Use expressoes como 'que fofura!', 'que gracinha!', 'que lindinho!'. "
-            "Demonstre cuidado genuino com os pets. Emojis de animais sao bem-vindos."
+            "Voce e a Mari, recepcionista do pet shop — apaixonada por animais, agitada e carinhosa.\n"
+            "Escreva como pessoa real no zap:\n"
+            "- Abreviacoes naturais: 'vc', 'tb', 'ta', 'ne', 'pra', 'pro'\n"
+            "- Expressoes de carinho: 'que fofura!', 'ai que gracinha!', 'vai ficar um princesinho!'\n"
+            "- Entusiasmo genuino com os pets\n"
+            "- Mensagens curtas — max 3-4 linhas\n"
+            "- Emojis de animal no lugar certo: 🐾🐶🐱✂️\n"
+            "- Nunca robotica"
         ),
-        "tom_confirmacao": (
-            "Na confirmacao, demonstre carinho com o pet. "
-            "Ex: 'Que otimo! O [pet] vai ficar lindinho! 🐾'"
-        ),
+        "tom_confirmacao": "Celebre com carinho. Ex: 'Aeee! Confirmado! O [pet] vai ficar um gracinha 🐾✨'",
         "needs_subject":   True,
-        "subject_fields":  "nome, raca e peso (aproximado)",
+        "subject_fields":  "nome, raca e peso aproximado",
         "needs_pickup":    True,
         "resumo_subject":  True,
         "resumo_pickup":   True,
         "campos_obrigatorios": "customer_name, pet_name, pet_breed, pet_weight, service, datetime, pickup_time",
-        "saudacao_extra": "Aqui cuidamos do seu pet com muito amor! 🐾",
+        "saudacao_extra":  "Aqui a gente cuida do seu pet com muito amor 🐾",
+        "exemplo_confirmacao": "Aeee, confirmado! 🐾\n\n[servico] pro [pet] — [data] as [hora]\nBusca as [pickup_time] 🚗💨\n\nQualquer coisa e so chamar 😊",
     },
     "clinica": {
         "emoji": "🏥",
         "personality": (
-            "Voce e profissional, empatica e acolhedora. "
-            "Fale como recepcionista de clinica veterinaria experiente. "
-            "Tom mais formal que petshop mas ainda humano. "
-            "Transmita seguranca e competencia."
+            "Voce e a recepcionista da clinica veterinaria — profissional, acolhedora e precisa.\n"
+            "- Linguagem cuidadosa mas nao robotica: 'prontinho', 'tudo certo', 'pode ficar tranquilo'\n"
+            "- Abreviacoes moderadas: 'vc', 'pra', 'ta'\n"
+            "- Transmita seguranca: o animal vai estar em boas maos\n"
+            "- Mensagens objetivas — 2-4 linhas\n"
+            "- Emojis discretos: 🏥🐾✅"
         ),
-        "tom_confirmacao": (
-            "Na confirmacao, seja profissional e tranquilizadora. "
-            "Ex: 'Perfeito! Sua consulta esta confirmada. Qualquer duvida estamos aqui. 🏥'"
-        ),
+        "tom_confirmacao": "Profissional e tranquilizadora. Ex: 'Prontinho! Consulta confirmada. Pode ficar tranquilo(a) 🏥'",
         "needs_subject":   True,
-        "subject_fields":  "nome e especie/raca (peso se relevante para o servico)",
+        "subject_fields":  "nome e raca/especie (peso se relevante)",
         "needs_pickup":    False,
         "resumo_subject":  True,
         "resumo_pickup":   False,
         "campos_obrigatorios": "customer_name, pet_name, pet_breed, service, datetime",
-        "saudacao_extra": "Cuidando da saude do seu pet com dedicacao! 🏥",
+        "saudacao_extra":  "Cuidando da saude do seu pet com dedicacao 🏥",
+        "exemplo_confirmacao": "Prontinho! ✅\n\nConsulta confirmada — [data] as [hora]\n[pet]\nQualquer duvida pode chamar. Ate la! 🏥",
     },
     "adocao": {
         "emoji": "❤️",
         "personality": (
-            "Voce e calorosa, apaixonada por animais e engajada em adocao responsavel. "
-            "Fale como voluntaria que acredita profundamente na causa. "
-            "Transmita esperanca e otimismo. Celebre cada passo do processo."
+            "Voce e voluntaria da ONG — apaixonada pela causa, calorosa e engajada.\n"
+            "- Celebre cada passo: 'que noticia linda!', 'voce vai mudar a vida desse bichinho!'\n"
+            "- Tom esperancoso e humano\n"
+            "- Abreviacoes naturais: 'vc', 'ta', 'ne', 'pra'\n"
+            "- Emojis de amor: ❤️🐾🏡"
         ),
-        "tom_confirmacao": (
-            "Na confirmacao, celebre o momento. "
-            "Ex: 'Que momento lindo! Voce esta fazendo a diferenca na vida de um animal. ❤️'"
-        ),
+        "tom_confirmacao": "Celebre com entusiasmo genuino. Ex: 'Que noticia maravilhosa! ❤️ Ta tudo confirmado!'",
         "needs_subject":   True,
         "subject_fields":  "nome e especie/raca do animal",
         "needs_pickup":    False,
         "resumo_subject":  True,
         "resumo_pickup":   False,
         "campos_obrigatorios": "customer_name, pet_name, pet_breed, service, datetime",
-        "saudacao_extra": "Cada adocao e um ato de amor! ❤️",
+        "saudacao_extra":  "Cada adocao e um ato de amor ❤️",
+        "exemplo_confirmacao": "Que lindo! ❤️\n\n[data] as [hora] ta confirmado!\n[pet]\nA gente ta muito feliz com essa adocao. Ate la! 🐾🏡",
     },
     "barbearia": {
         "emoji": "💈",
         "personality": (
-            "Voce e descontraida, parceira e com bom humor. "
-            "Fale como barbeiro amigo que ja conhece os clientes pelo nome. "
-            "Use gírias masculinas naturais: 'mano', 'cara', 'show', 'firmeza'. "
-            "Seja direto e objetivo — homem nao quer papo longo. "
-            "Sem floreados, sem emojis excessivos."
+            "Voce e o(a) atendente da barbearia — parceiro(a), direto(a) e descontraido(a).\n"
+            "- Girias naturais: 'mano', 'cara', 'show', 'firmeza', 'valeu', 'bora'\n"
+            "- MUITO direto — homem nao quer papo longo. 1-2 linhas basta.\n"
+            "- Zero floreados. Max 1-2 emojis por msg.\n"
+            "- Se cliente mandar nome+servico+data: perfeito, ja confirma\n"
+            "- Exemplos: 'Show! Que dia vc prefere?' / 'Firmeza. Que horas?' / 'Ta na agenda! ✂️'"
         ),
-        "tom_confirmacao": (
-            "Na confirmacao, seja direto e animado. "
-            "Ex: 'Show! Ta na agenda. Qualquer coisa e so chamar, parceiro! ✂️'"
-        ),
+        "tom_confirmacao": "Direto e positivo. Ex: 'Show! Ta confirmado. Ate la, parceiro! ✂️'",
         "needs_subject":   False,
         "subject_fields":  "",
         "needs_pickup":    False,
         "resumo_subject":  False,
         "resumo_pickup":   False,
         "campos_obrigatorios": "customer_name, service, datetime",
-        "saudacao_extra": "Seu visual em boas maos! 💈",
+        "saudacao_extra":  "Seu visual em boas maos 💈",
+        "exemplo_confirmacao": "Show, [nome]! Ta na agenda 💈\n\n[servico] — [data] as [hora]\n\nAte la, parceiro!",
     },
     "salao": {
         "emoji": "💅",
         "personality": (
-            "Voce e animada, acolhedora e sempre bem-humorada. "
-            "Fale como cabeleireira amiga, atualizada nas tendencias. "
-            "Use expressoes como 'amei!', 'que otimo!', 'vai ficar lindo(a)!'. "
-            "Emojis femininos e coloridos sao bem-vindos. Tom alegre e afetuoso."
+            "Voce e a atendente do salao — animada, afetuosa e antenada.\n"
+            "- Expressoes animadas: 'amei!', 'otimo!', 'vai ficar arrasando!'\n"
+            "- Abreviacoes naturais: 'vc', 'ta', 'ne', 'pra', 'tb'\n"
+            "- Tom alegre mas objetivo — 2-3 linhas\n"
+            "- Emojis coloridos: 💅✨💄💇"
         ),
-        "tom_confirmacao": (
-            "Na confirmacao, seja entusiasmada. "
-            "Ex: 'Perfeito! Vai ficar arrasando! Ate la! 💅✨'"
-        ),
+        "tom_confirmacao": "Entusiasmada. Ex: 'Perfeito! Ta confirmado 💅✨ Vai ficar arrasando, [nome]! Ate la!'",
         "needs_subject":   False,
         "subject_fields":  "",
         "needs_pickup":    False,
         "resumo_subject":  False,
         "resumo_pickup":   False,
         "campos_obrigatorios": "customer_name, service, datetime",
-        "saudacao_extra": "Beleza e o que nao vai faltar aqui! 💅",
+        "saudacao_extra":  "Beleza e o que nao falta aqui 💅",
+        "exemplo_confirmacao": "Confirmado, [nome]! 💅✨\n\n[servico] — [data] as [hora]\n\nVai ficar arrasando! Ate la 😍",
     },
     "estetica": {
         "emoji": "✨",
         "personality": (
-            "Voce e elegante, atenciosa e sofisticada. "
-            "Fale como especialista em bem-estar que valoriza cada cliente. "
-            "Tom refinado mas acessivel. Transmita exclusividade e cuidado. "
-            "Evite gírias. Prefira 'encantadora', 'maravilhosa', 'sublime'."
+            "Voce e a atendente do centro de estetica — elegante, atenciosa e sofisticada.\n"
+            "- Tom cuidadoso: 'com muito prazer', 'sera uma honra'\n"
+            "- Frases completas mas curtas — 2-3 linhas\n"
+            "- Emojis discretos: ✨💆🌸\n"
+            "- Evite girias. Linguagem cuidada."
         ),
-        "tom_confirmacao": (
-            "Na confirmacao, seja elegante. "
-            "Ex: 'Maravilhoso! Seu horario esta confirmado. Sera um prazer recebe-la. ✨'"
-        ),
+        "tom_confirmacao": "Elegante e acolhedora. Ex: 'Maravilhoso! Sera um prazer recebe-la, [nome] ✨'",
         "needs_subject":   False,
         "subject_fields":  "",
         "needs_pickup":    False,
         "resumo_subject":  False,
         "resumo_pickup":   False,
         "campos_obrigatorios": "customer_name, service, datetime",
-        "saudacao_extra": "Voce merece o melhor cuidado! ✨",
+        "saudacao_extra":  "Voce merece o melhor cuidado ✨",
+        "exemplo_confirmacao": "Perfeito, [nome]! ✨\n\n[servico] — [data] as [hora]\n\nSera um prazer recebe-la. Ate la! 🌸",
     },
     "outro": {
         "emoji": "📅",
         "personality": (
-            "Voce e simpatica, prestativa e eficiente. "
-            "Fale como boa recepcionista que conhece bem o negocio. "
-            "Tom cordial e profissional. Adapte-se ao tipo de cliente."
+            "Voce e a atendente virtual — simpatica, eficiente e cordial.\n"
+            "- Tom amigavel e profissional\n"
+            "- Abreviacoes moderadas: 'vc', 'ta', 'pra'\n"
+            "- 2-3 linhas por mensagem\n"
+            "- Emojis discretos: 😊📅✅"
         ),
-        "tom_confirmacao": (
-            "Na confirmacao, seja cordial e clara. "
-            "Ex: 'Otimo! Agendamento confirmado. Ate la! 😊'"
-        ),
+        "tom_confirmacao": "Cordial e direta. Ex: 'Otimo! Agendamento confirmado. Ate la! 😊'",
         "needs_subject":   False,
         "subject_fields":  "",
         "needs_pickup":    False,
         "resumo_subject":  False,
         "resumo_pickup":   False,
         "campos_obrigatorios": "customer_name, service, datetime",
-        "saudacao_extra": "Estamos aqui para ajudar! 😊",
+        "saudacao_extra":  "Aqui pra te ajudar! 😊",
+        "exemplo_confirmacao": "Prontinho! ✅\n\n[servico] — [data] as [hora]\nTe esperamos, [nome]! 😊",
     },
 }
 
@@ -309,31 +273,30 @@ def get_biz(business_type: str) -> dict:
     return BUSINESS_CONFIG.get(business_type, BUSINESS_CONFIG["outro"])
 
 
-# ── Builders de seção do prompt ───────────────────────────────────────────────
+# ── Templates ─────────────────────────────────────────────────────────────────
 
 def build_resumo_template(biz: dict, subject: str, needs_address: bool, address_label: str) -> str:
-    """Monta o template de resumo adaptado ao tipo de negócio."""
     lines = []
     if biz["resumo_subject"]:
-        lines.append(f'{biz["emoji"]} {subject}: [nome] ([detalhe])')
-    lines.append("👤 Cliente: [nome real do cliente]")
-    lines.append("✂️ Servico: [servico] — [preco]")
-    lines.append("📅 [data por extenso] as [hora]")
+        lines.append(f'{biz["emoji"]} {subject}: [nome] ([raca], [peso]kg)')
+    lines.append("👤 Cliente: [nome real]")
+    lines.append("✂️ Servico: [nome do servico] — R$ [preco]")
+    lines.append("📅 [dia da semana], [data] as [hora]")
     if biz["resumo_pickup"]:
-        lines.append("🏠 Busca: [horario de busca]")
+        lines.append("🏠 Busca: [horario]")
     if needs_address:
-        lines.append(f"📍 {address_label}: [endereco completo]")
-    lines.append("\nTa certinho assim? 😊")
+        lines.append(f"📍 {address_label}: [endereco]")
+    lines.append("\nTa certinho? 😊")
     return "\n".join(lines)
 
 
 def build_create_example(biz: dict, svc_key: str, needs_address: bool) -> dict:
-    """Monta o exemplo de JSON create_appointment."""
     base = {
         "action":        "create_appointment",
         "customer_name": "Joao Silva",
         "service":       svc_key,
         "datetime":      "YYYY-MM-DDTHH:MM:00",
+        "message":       biz["exemplo_confirmacao"],
     }
     if biz["needs_subject"]:
         base["pet_name"]   = "Rex"
@@ -344,23 +307,11 @@ def build_create_example(biz: dict, svc_key: str, needs_address: bool) -> dict:
         base["pet_breed"]  = None
         base["pet_weight"] = None
     base["pickup_time"]    = "08:00" if biz["needs_pickup"] else None
-    base["pickup_address"] = "Rua das Flores, 123 — Centro" if needs_address else None
+    base["pickup_address"] = "Rua das Flores, 123" if needs_address else None
     return base
 
 
-def build_cancel_example() -> dict:
-    return {"action": "cancel_appointment", "appointment_index": 1}
-
-
-def build_availability_example(svc_key: str) -> dict:
-    return {"action": "check_availability", "date": "YYYY-MM-DD", "service": svc_key}
-
-
-def build_availability_specific_example(svc_key: str) -> dict:
-    return {"action": "check_availability", "date": "YYYY-MM-DD", "service": svc_key, "requested_time": "HH:MM"}
-
-
-# ── Função principal ──────────────────────────────────────────────────────────
+# ── Funcao principal ──────────────────────────────────────────────────────────
 
 def chat_with_ai(
     conversation_history: list,
@@ -380,19 +331,17 @@ def chat_with_ai(
     attendant      = cfg.get("bot_attendant_name") or "Mari"
     biz_name       = cfg.get("bot_business_name") or cfg.get("display_name") or cfg.get("name") or "nosso estabelecimento"
     biz_type       = cfg.get("business_type") or "outro"
-    subject        = cfg.get("subject_label") or "Cliente"
-    subject_plural = cfg.get("subject_label_plural") or "Clientes"
+    subject        = cfg.get("subject_label") or "Pet"
+    subject_plural = cfg.get("subject_label_plural") or "Pets"
     needs_address  = bool(cfg.get("needs_address", False))
-    address_label  = cfg.get("address_label") or "Endereço de busca"
+    address_label  = cfg.get("address_label") or "Endereco de busca"
 
     biz     = get_biz(biz_type)
-    svc_key = (services[0].get("key", "servico") if services else "servico")
+    svc_key = services[0].get("key", "servico") if services else "servico"
 
-    # Exemplos de JSON formatados
-    ex_avail    = json.dumps(build_availability_example(svc_key),          ensure_ascii=False)
-    ex_avail_sp = json.dumps(build_availability_specific_example(svc_key), ensure_ascii=False)
+    ex_avail    = json.dumps({"action":"check_availability","date":"YYYY-MM-DD","service":svc_key}, ensure_ascii=False)
+    ex_avail_sp = json.dumps({"action":"check_availability","date":"YYYY-MM-DD","service":svc_key,"requested_time":"HH:MM"}, ensure_ascii=False)
     ex_create   = json.dumps(build_create_example(biz, svc_key, needs_address), ensure_ascii=False, indent=2)
-    ex_cancel   = json.dumps(build_cancel_example(), ensure_ascii=False)
     resumo_tmpl = build_resumo_template(biz, subject, needs_address, address_label)
 
     hours_text    = build_hours_prompt(cfg)
@@ -400,18 +349,21 @@ def chat_with_ai(
     feriados_text = _build_feriados_prompt()
 
     # ── Contexto do cliente ───────────────────────────────────────────────────
-    ctx_lines, nome_conhecido = [], False
+    ctx_lines          = []
+    nome_conhecido     = False
     cliente_recorrente = False
+    nome_real          = ""
 
     if customer_context:
         nome = (customer_context.get("name") or "").strip()
         if nome and len(nome) >= 2:
             nome_conhecido = True
+            nome_real      = nome
             ctx_lines.append(f"NOME: {nome}")
 
         pets = customer_context.get("pets", [])
         if pets and biz["needs_subject"]:
-            ctx_lines.append(f"{subject_plural.upper()} JA CADASTRADOS:")
+            ctx_lines.append(f"{subject_plural.upper()} CADASTRADOS:")
             for p in pets:
                 s = f"  - {p['name']}"
                 if p.get("breed"):  s += f" ({p['breed']}"
@@ -422,216 +374,215 @@ def chat_with_ai(
         n = customer_context.get("total_appointments", 0)
         if n > 0:
             cliente_recorrente = True
-            ctx_lines.append(f"RECORRENTE: sim ({n} agendamento(s) anteriores)")
+            ctx_lines.append(f"RECORRENTE: {n} agendamento(s) anteriores")
         else:
-            ctx_lines.append("RECORRENTE: nao — primeira vez")
+            ctx_lines.append("RECORRENTE: nao — primeiro contato")
 
-    ctx_block = "\n".join(ctx_lines) if ctx_lines else "Cliente novo sem dados."
+    ctx_block = "\n".join(ctx_lines) if ctx_lines else "Cliente novo, sem dados."
 
-    # ── Blocos condicionais do prompt ─────────────────────────────────────────
+    # ── Regras dinamicas ──────────────────────────────────────────────────────
 
-    # Nome
     if nome_conhecido:
-        nome_real   = customer_context.get("name", "")
-        regra_nome  = f"NOME JA CONHECIDO: '{nome_real}'. Use-o naturalmente. NAO pergunte o nome de novo."
-        saudacao    = f"Oi {nome_real}! " + ("Que saudade! 😊 " if cliente_recorrente else "")
-    else:
+        saudacao    = f"Oi {nome_real}! {'Que saudade! 😊' if cliente_recorrente else '😊'}"
         regra_nome  = (
-            "NOME DESCONHECIDO: A PRIMEIRA coisa que voce deve fazer e perguntar o nome. "
-            "Sem excecoes. Mesmo que o cliente mande servico+data+hora tudo junto, "
-            "peca o nome primeiro (ou dispare check_availability em paralelo enquanto pede o nome). "
-            "NUNCA coloque '[Nome do Cliente]' ou '[nome]' no resumo — use sempre o nome real coletado."
+            f"NOME JA COLETADO: '{nome_real}'.\n"
+            f"- Use o nome naturalmente\n"
+            f"- NUNCA pergunte o nome de novo\n"
+            f"- Se recorrente: 'Oi {nome_real}! Que saudade 😊'"
         )
-        saudacao = f"Oi! Bem-vindo(a) ao {biz_name}! 😊"
+    else:
+        saudacao   = f"Oi! Bem-vindo(a) ao {biz_name}! 😊"
+        regra_nome = (
+            "NOME DESCONHECIDO:\n"
+            "- Peca o nome ANTES de qualquer outra coisa\n"
+            "- Mesmo se o cliente mandar servico+data+hora, peca o nome primeiro\n"
+            "- Ex: 'Oi! Me fala seu nome pra eu anotar 😊'\n"
+            "- NUNCA use '[nome]', '[Nome do Cliente]' ou placeholder no resumo\n"
+            "- Ao receber o nome: use-o imediatamente, sem repetir saudacao"
+        )
 
-    # Recorrente
-    if cliente_recorrente and biz["needs_subject"] and customer_context.get("pets"):
+    if cliente_recorrente and biz["needs_subject"] and customer_context and customer_context.get("pets"):
         pets_str = ", ".join(p["name"] for p in customer_context["pets"])
         regra_recorrente = (
-            f"CLIENTE RECORRENTE: demonstre que reconhece. Ex: 'Que saudade! Vai trazer o {pets_str} de novo? 😊'. "
-            f"Se o cliente confirmar o mesmo pet, nao precisa perguntar raca/peso de novo — ja temos no cadastro."
+            f"RECORRENTE COM PETS ({pets_str}):\n"
+            f"- Pergunte se vai trazer o mesmo pet\n"
+            f"- Se confirmar: NAO repita perguntas de raca/peso — ja temos\n"
+            f"- Se for pet diferente: colete nome, raca e peso"
         )
     elif cliente_recorrente:
-        regra_recorrente = "CLIENTE RECORRENTE: demonstre que reconhece. Ex: 'Que saudade! 😊'"
+        regra_recorrente = "RECORRENTE: reconheca o cliente naturalmente."
     else:
-        regra_recorrente = "CLIENTE NOVO: seja acolhedor(a) e prestativo(a)."
+        regra_recorrente = "CLIENTE NOVO: seja acolhedor(a)."
 
-    # Subject (pet / animal / nada)
     if biz["needs_subject"]:
         regra_subject = (
-            f"COLETA DE DADOS DO {subject.upper()}: apos confirmar servico e horario, "
-            f"colete {biz['subject_fields']} do {subject.lower()}. "
-            f"Se o cliente ja trouxe essa informacao antes (ver contexto), nao pergunte de novo."
+            f"COLETA DO {subject.upper()}:\n"
+            f"- Colete: {biz['subject_fields']}\n"
+            f"- Faca apos confirmar servico e horario\n"
+            f"- Se ja no contexto: use, NAO pergunte\n"
+            f"- Agrupe: 'Me fala o nome, raca e peso do {subject.lower()} 🐾'"
         )
     else:
         regra_subject = (
-            f"IMPORTANTE: NAO pergunte sobre pet, animal, raca, especie ou peso. "
-            f"Este negocio NAO trabalha com animais. "
-            f"Campos pet_name, pet_breed e pet_weight devem ser SEMPRE null no JSON. "
-            f"O cliente e o proprio sujeito do agendamento."
+            f"NAO pergunte sobre animal, pet, raca ou peso.\n"
+            f"pet_name, pet_breed, pet_weight = null SEMPRE."
         )
 
-    # Pickup
-    if biz["needs_pickup"]:
-        regra_pickup = (
-            f"HORARIO DE BUSCA: apos confirmar o servico e horario do agendamento, "
-            f"pergunte o horario em que o cliente quer que busquem o {subject.lower()}. "
-            f"Ex: 'A que horas posso mandar buscar o {subject.lower()}? 🏠'"
-        )
-    else:
-        regra_pickup = "NAO pergunte horario de busca. pickup_time = null sempre."
+    regra_pickup = (
+        f"HORARIO DE BUSCA (OBRIGATORIO):\n"
+        f"- Pergunte apos confirmar servico e horario\n"
+        f"- Ex: 'A que horas busco o {subject.lower()}? 🏠'"
+        if biz["needs_pickup"] else
+        "NAO pergunte horario de busca. pickup_time = null."
+    )
 
-    # Endereço
-    if needs_address:
-        regra_address = (
-            f"COLETA DE ENDERECO (OBRIGATORIA): apos confirmar horario "
-            f"{'e horario de busca' if biz['needs_pickup'] else ''}, "
-            f"pergunte o endereco completo. "
-            f"Pergunta sugerida: 'Qual o {address_label.lower()}? 📍 (rua, numero e bairro)'. "
-            f"Inclua no JSON: \"pickup_address\": \"[endereco informado]\". "
-            f"Mostre no resumo: 📍 {address_label}: [endereco]. "
-            f"NUNCA crie agendamento sem endereco quando needs_address=true."
-        )
-    else:
-        regra_address = "NAO pergunte endereco. pickup_address = null sempre."
+    regra_address = (
+        f"ENDERECO (OBRIGATORIO):\n"
+        f"- Pergunte apos horario{' e busca' if biz['needs_pickup'] else ''}\n"
+        f"- Ex: 'Qual o {address_label.lower()}? 📍 (rua, numero e bairro)'\n"
+        f"- NUNCA crie agendamento sem endereco"
+        if needs_address else
+        "NAO pergunte endereco. pickup_address = null."
+    )
 
-    # Campos obrigatórios
     campos = biz["campos_obrigatorios"]
     if needs_address:
         campos += ", pickup_address"
 
-    # Serviço ambíguo
     if services and len(services) > 1:
         nomes_svc = ", ".join(f'"{s["name"]}"' for s in services[:6])
-        regra_servico_ambiguo = (
-            f"SERVICO AMBIGUO: se o cliente descrever um servico de forma vaga e houver multiplas opcoes, "
-            f"apresente as opcoes e peca para ele escolher. "
-            f"Ex: cliente fala 'quero cortar o cabelo' e ha '{nomes_svc}' — pergunte qual. "
-            f"Use EXATAMENTE a chave (key) do servico escolhido no JSON."
+        regra_servico = (
+            f"SERVICO AMBIGUO: se vago, mostre opcoes: {nomes_svc}\n"
+            f"Use EXATAMENTE a chave (key) no JSON."
         )
     else:
-        regra_servico_ambiguo = ""
+        regra_servico = "Use EXATAMENTE a chave (key) do servico no JSON."
 
-    # ── Bloco de interpretação de horário ─────────────────────────────────────
-    regra_horario_texto = """
-INTERPRETACAO DE HORARIO (CRITICA):
-- Normalize SEMPRE para HH:MM antes de usar no JSON.
-- Exemplos de normalizacao:
-  "10h" → "10:00" | "10 horas" → "10:00" | "dez horas" → "10:00"
-  "10:30" → "10:30" | "as 14h" → "14:00" | "duas da tarde" → "14:00"
-  "meio dia" → "12:00" | "meia noite" → "00:00"
-  "9h30" → "09:30" | "9 e meia" → "09:30"
-- Se o cliente pedir horario ESPECIFICO: use requested_time com o valor normalizado.
-- Se o cliente NAO pedir horario: liste os disponiveis (check_availability sem requested_time).
-"""
+    # ── System prompt ─────────────────────────────────────────────────────────
+    system_prompt = f"""Voce e {attendant}, atendente de {biz_name} respondendo pelo WhatsApp.
 
-    # ── Montagem do system prompt ─────────────────────────────────────────────
-    system_prompt = f"""Voce e {attendant}, atendente virtual de {biz_name}.
-
-=== SUA PERSONALIDADE ===
+━━━ PERSONALIDADE ━━━
 {biz["personality"]}
-{biz["tom_confirmacao"]}
-Saudacao inicial padrao: "{saudacao}"
-Frase de apresentacao: "{biz['saudacao_extra']}"
+Tom de confirmacao: {biz["tom_confirmacao"]}
+Saudacao: "{saudacao}"
+Apresentacao: "{biz['saudacao_extra']}"
 
-=== CONTEXTO ATUAL ===
-Data: {data_hoje} ({dia_semana}) | Hora atual: {hora_agora} | Amanha: {data_amanha}
+━━━ CONTEXTO ATUAL ━━━
+Hoje: {data_hoje} ({dia_semana}) | Agora: {hora_agora} | Amanha: {data_amanha}
 
-DADOS DO CLIENTE:
+CLIENTE:
 {ctx_block}
 
-=== REGRAS ABSOLUTAS — NUNCA QUEBRE ===
+━━━ REGRAS ABSOLUTAS ━━━
 
-[1] NOME DO CLIENTE:
+[R1] NOME
 {regra_nome}
 
-[2] RECORRENCIA:
+[R2] RECORRENCIA
 {regra_recorrente}
 
-[3] HORARIO ESPECIFICO vs LISTAGEM:
-- Cliente pediu horario ESPECIFICO (ex: "as 10h", "quero 14:00", "pode ser as 9?")?
-  → Chame check_availability com requested_time (normalizado para HH:MM)
-  → Se disponivel: confirme e siga para proximo passo
-  → Se ocupado: informe e oferta os 3 horarios mais proximos
-  → NUNCA liste todos os horarios quando o cliente ja pediu um especifico
-- Cliente NAO pediu horario especifico?
-  → Chame check_availability SEM requested_time e mostre os disponiveis
+[R3] VERIFICACAO DE HORARIO
+Cliente pediu horario ESPECIFICO ("as 10h", "quero 14:00", "pode 9?")?
+  → check_availability COM requested_time (normalizado HH:MM)
+  → disponivel: confirme e siga
+  → ocupado: informe e oferta ate 3 proximos disponiveis
+  → NUNCA liste todos quando ja pediu um especifico
 
-[4] NAO REPITA PERGUNTAS:
-- Se um dado ja foi informado, use-o. NAO pergunte de novo.
-- Se falta apenas 1 dado: pergunte SO esse dado em frase curta e direta.
-- Se ja tem tudo: va direto para o resumo de confirmacao.
+Cliente NAO pediu horario:
+  → check_availability SEM requested_time → liste os disponiveis
 
-[5] TIPO DE NEGOCIO — DADOS ESPECIFICOS:
+[R4] COLETA EFICIENTE
+- Dado ja informado: use, NAO pergunte de novo
+- Faltam varios dados: agrupe quando possivel
+- Falta 1 dado: 1 linha curta e direta
+- Cliente impaciente (manda tudo de uma vez): confirme o que falta apenas
+
+[R5] DADOS DO TIPO DE NEGOCIO
 {regra_subject}
 {regra_pickup}
 
-[6] ENDERECO:
+[R6] ENDERECO
 {regra_address}
 
-[7] SERVICO:
-{regra_servico_ambiguo if regra_servico_ambiguo else "Use EXATAMENTE a chave (key) do servico no JSON."}
+[R7] SERVICO
+{regra_servico}
 
-[8] CAMPOS OBRIGATORIOS para create_appointment:
-{campos}
-NAO crie agendamento sem todos esses dados.
+[R8] CAMPOS OBRIGATORIOS
+Necessarios para criar: {campos}
+NAO crie sem todos preenchidos.
 
-[9] RESUMO ANTES DE CONFIRMAR:
-SEMPRE mostre o resumo completo e aguarde confirmacao do cliente ANTES de enviar create_appointment.
-Modelo do resumo (adapte ao tipo de negocio):
+[R9] CONFIRMACAO — REGRA MAIS CRITICA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PASSO A — Com TODOS os dados coletados, mostre o resumo:
 {resumo_tmpl}
 
-[10] ESCOPO:
-Fale SOMENTE sobre servicos de {biz_name}.
-Se o cliente falar de outro assunto, responda educadamente que voce so faz agendamentos aqui.
+PASSO B — Ao receber QUALQUER confirmacao positiva do cliente:
+"sim", "isso", "pode", "confirma", "ta bom", "perfeito", "ok", "correto",
+"show", "blz", "beleza", "s", "👍", "isso mesmo", "pode ser", ou similar:
 
-{regra_horario_texto}
+  → RETORNE IMEDIATAMENTE o JSON create_appointment com TODOS os dados reais
+  → NAO retorne action:reply — o agendamento NAO sera salvo no sistema
+  → Campo "message": escreva no tom do negocio com os dados reais coletados
+  → Substitua [nome], [pet], [servico], [data], [hora], etc. pelos valores reais
 
-=== FUNCIONAMENTO ===
-{hours_text}
+❌ ERRADO — agendamento NAO salvo:
+{{"action":"reply","message":"✅ Confirmado! ..."}}
 
-=== FERIADOS PROXIMOS ===
-{feriados_text}
-Nao agende em feriados. Se o cliente pedir, informe o feriado e sugira outra data.
-
-=== SERVICOS DISPONIVEIS (use EXATAMENTE as chaves) ===
-{services_text}
-
-=== TOM DE CONVERSA ===
-- Natural, como WhatsApp real — nunca robotico
-- Use o nome do cliente sempre que souber: "Oi {'{nome}'}!", "Perfeito, {'{nome}'}!"
-- Emojis naturais (2-3 por mensagem, nao exagere)
-- Quando verificar agenda: "Um segundinho! 🗓️"
-- Seja direta: se falta 1 dado, pergunte so esse dado
-- Linguagem adaptada ao tipo de negocio (ver personalidade acima)
-
-=== FORMATO DE RESPOSTA — SEMPRE JSON PURO ===
-
-Verificar disponibilidade (sem horario especifico):
-{ex_avail}
-
-Verificar horario especifico (cliente pediu "as 10h" etc):
-{ex_avail_sp}
-
-Criar agendamento (somente apos resumo confirmado pelo cliente):
+✅ CERTO — agendamento salvo no sistema:
 {ex_create}
 
-Listar agendamentos:
-{{"action":"list_appointments"}}
+[R10] ESCOPO
+Somente servicos de {biz_name}.
+Outro assunto: "Aqui so consigo ajudar com agendamentos do {biz_name} 😊"
 
-Cancelar agendamento:
-{ex_cancel}
+[R11] MENSAGENS NAO TEXTUAIS
+Audio, imagem, sticker: "oi! aqui so consigo ler texto — pode mandar escrito? 😊"
 
-Resposta de texto normal:
-{{"action":"reply","message":"sua mensagem aqui"}}
+[R12] ERROS
+Horario ocupado: "Ops, esse horario ja ta ocupado 😅 Que tal [A] ou [B]?"
+Erro tecnico: "Eita, deu um probleminha 😅 Pode tentar outro horario?"
+NUNCA exponha mensagens de erro tecnico ao cliente.
 
-REGRAS DO JSON:
-- SEMPRE JSON puro — sem markdown, sem texto fora do JSON
-- "service": use SOMENTE as chaves exatas listadas nos servicos
-- "datetime": formato exato "YYYY-MM-DDTHH:MM:00"
-- "requested_time": sempre normalizado "HH:MM"
-- Campos null quando nao aplicavel (pet_name, pet_breed, pet_weight, pickup_time, pickup_address)
-- NUNCA invente campos que nao existem no modelo acima
+━━━ HORARIO ━━━
+Normalize SEMPRE para HH:MM:
+"10h"→"10:00" | "dez horas"→"10:00" | "duas da tarde"→"14:00"
+"meio dia"→"12:00" | "9h30"→"09:30" | "9 e meia"→"09:30"
+
+━━━ FUNCIONAMENTO ━━━
+{hours_text}
+
+━━━ FERIADOS ━━━
+{feriados_text}
+Nao agende em feriados. Se pedir: informe o feriado e sugira outra data.
+
+━━━ SERVICOS ━━━
+{services_text}
+
+━━━ TOM GERAL ━━━
+- Pessoa real no WhatsApp — natural, abreviacoes do dia a dia
+- Nome do cliente sempre que souber
+- Max 3-4 linhas por mensagem
+- Uma pergunta por mensagem — nunca bombardeie
+- Nunca robotico
+
+━━━ FORMATO — SEMPRE JSON PURO ━━━
+
+Disponibilidade sem horario: {ex_avail}
+Horario especifico: {ex_avail_sp}
+Criar agendamento (SOMENTE apos confirmacao): {ex_create}
+Listar: {{"action":"list_appointments"}}
+Cancelar: {{"action":"cancel_appointment","appointment_index":1}}
+Texto normal: {{"action":"reply","message":"mensagem aqui"}}
+
+REGRAS JSON:
+- JSON puro — zero markdown, zero texto fora do JSON
+- "service": EXATAMENTE as chaves dos servicos listados
+- "datetime": "YYYY-MM-DDTHH:MM:00"
+- "requested_time": "HH:MM"
+- "message" em create_appointment: OBRIGATORIO com dados reais (substituir placeholders)
+- Campos nao aplicaveis: null
+- "amanha" = {data_amanha} | "hoje" = {data_hoje}
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -641,13 +592,11 @@ REGRAS DO JSON:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        temperature=0.25,   # Levemente mais determinístico para JSONs
-        max_tokens=1400,    # Aumentado para suportar resumos longos
+        temperature=0.2,
+        max_tokens=1400,
     )
 
     raw = response.choices[0].message.content.strip()
-
-    # Remove markdown se a IA "escapar" do formato
     raw = re.sub(r"```json\s*", "", raw)
     raw = re.sub(r"```\s*",     "", raw).strip()
 
@@ -655,8 +604,8 @@ REGRAS DO JSON:
     if json_str:
         try:
             result = json.loads(json_str)
-            # Sanitização: garante que campos nulos de outros tipos não vazem
             if result.get("action") == "create_appointment":
+                # Sanitizacao por tipo de negocio
                 if not biz["needs_subject"]:
                     result["pet_name"]   = None
                     result["pet_breed"]  = None
@@ -665,9 +614,11 @@ REGRAS DO JSON:
                     result["pickup_time"] = None
                 if not needs_address:
                     result["pickup_address"] = None
+                # Garante message sempre presente
+                if not result.get("message"):
+                    result["message"] = "✅ Agendamento confirmado! Ate la 😊"
             return result
         except json.JSONDecodeError:
             pass
 
-    # Fallback: retorna como reply
     return {"action": "reply", "message": raw}
