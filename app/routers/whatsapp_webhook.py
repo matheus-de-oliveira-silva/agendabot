@@ -350,6 +350,7 @@ async def whatsapp_webhook(request: Request):
                         # LGPD: nunca loga endereço
                         print(f"[Agendamento] criado | endereço: {'sim' if pickup_address else 'não'}")
                     else:
+                        print(f"[Agendamento] ERRO: {result['error']}")
                         reply_text = f"😕 Não consegui confirmar esse horário ({result['error']}). Vamos tentar outro?"
 
         elif action == "list_appointments":
