@@ -922,21 +922,34 @@ footer a:hover{color:#a78bfa}
 
   <p>A BotGen ("nós", "nosso") está comprometida com a proteção dos seus dados pessoais em conformidade com a <strong>Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018)</strong>. Esta política explica como coletamos, usamos e protegemos suas informações.</p>
 
-  <h2>1. Quem somos</h2>
+  <h2>1. Quem somos e nossa função</h2>
   <p>A BotGen é um serviço de automação de agendamentos pelo WhatsApp com inteligência artificial, voltado para pequenos negócios brasileiros. Nosso contato: <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a>.</p>
 
+  <div class="box">
+    <strong>⚖️ Operador vs Controlador de Dados (LGPD)</strong><br><br>
+    <p style="margin:8px 0 0">A BotGen atua como <strong>Operadora de Dados</strong> nos termos do Art. 5º, VII da LGPD. Nossos clientes (donos de negócio) são os <strong>Controladores</strong> dos dados dos seus clientes finais.</p>
+    <p style="margin:8px 0 0">Isso significa que:</p>
+    <ul style="margin:8px 0 0;padding-left:20px">
+      <li>O dono do negócio é responsável pela coleta e uso dos dados dos seus clientes finais</li>
+      <li>A BotGen processa esses dados apenas para executar o serviço contratado</li>
+      <li>A BotGen não acessa, usa ou compartilha dados dos clientes finais para fins próprios</li>
+      <li>O dono do negócio deve informar seus clientes que usa um sistema automatizado de agendamento</li>
+    </ul>
+  </div>
+
   <h2>2. Dados que coletamos</h2>
-  <p><strong>Dados dos nossos clientes (donos de negócio):</strong></p>
+  <p><strong>Dados dos nossos clientes (donos de negócio) — como Controladores:</strong></p>
   <ul>
     <li>Nome e email fornecidos na compra (via Kiwify)</li>
     <li>Número de WhatsApp para notificações</li>
     <li>Dados do negócio: nome, horários, serviços</li>
   </ul>
-  <p><strong>Dados dos clientes finais (usuários do WhatsApp):</strong></p>
+  <p><strong>Dados dos clientes finais (usuários do WhatsApp) — como Operadores:</strong></p>
   <ul>
     <li>Nome e número de telefone (fornecidos voluntariamente no chat)</li>
     <li>Dados dos agendamentos: data, serviço, informações do pet (quando aplicável)</li>
     <li>Histórico de conversa (limitado a 20 mensagens, resetado após 24h de inatividade)</li>
+    <li>Esses dados são processados exclusivamente para executar o serviço de agendamento</li>
   </ul>
 
   <h2>3. Como usamos os dados</h2>
@@ -949,10 +962,16 @@ footer a:hover{color:#a78bfa}
   </ul>
 
   <h2>4. Base legal (LGPD)</h2>
+  <p><strong>Para dados dos donos de negócio (BotGen como Controladora):</strong></p>
   <ul>
     <li><strong>Execução de contrato</strong> (Art. 7º, V): processamento necessário para prestação do serviço</li>
     <li><strong>Legítimo interesse</strong> (Art. 7º, IX): notificações operacionais do serviço</li>
-    <li><strong>Consentimento</strong> (Art. 7º, I): ao iniciar uma conversa com o bot, o usuário consente com o processamento para fins de agendamento</li>
+  </ul>
+  <p><strong>Para dados dos clientes finais (BotGen como Operadora):</strong></p>
+  <ul>
+    <li><strong>Cumprimento de obrigação contratual com o Controlador</strong> (Art. 7º, V): processamos dados apenas conforme instruído pelo dono do negócio</li>
+    <li>A base legal para coleta dos dados dos clientes finais é responsabilidade do Controlador (dono do negócio)</li>
+    <li>O Controlador deve garantir que seus clientes finais estejam cientes do uso do sistema automatizado</li>
   </ul>
 
   <h2>5. Compartilhamento de dados</h2>
@@ -976,7 +995,17 @@ footer a:hover{color:#a78bfa}
     </ul>
   </div>
 
-  <h2>7. Seus direitos (LGPD)</h2>
+  <h2>7. Responsabilidades do Controlador (dono do negócio)</h2>
+  <p>Ao contratar a BotGen, o dono do negócio assume as seguintes responsabilidades como Controlador de Dados:</p>
+  <ul>
+    <li>Informar seus clientes finais que utiliza um sistema automatizado de agendamento via WhatsApp</li>
+    <li>Garantir base legal adequada para coleta dos dados dos seus clientes finais</li>
+    <li>Responder às solicitações de titulares (clientes finais) sobre seus dados</li>
+    <li>Manter atualizada sua própria política de privacidade contemplando o uso do bot</li>
+  </ul>
+  <p>A BotGen disponibiliza os dados dos clientes finais exclusivamente ao respectivo dono do negócio, através do painel seguro, sem acesso por outros clientes ou terceiros.</p>
+
+  <h2>8. Seus direitos (LGPD)</h2>
   <p>Como titular dos dados, você tem direito a:</p>
   <ul>
     <li><strong>Acesso</strong>: solicitar cópia dos seus dados</li>
@@ -988,22 +1017,22 @@ footer a:hover{color:#a78bfa}
   </ul>
   <p>Para exercer seus direitos, entre em contato: <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a></p>
 
-  <h2>8. Retenção de dados</h2>
+  <h2>9. Retenção de dados</h2>
   <ul>
     <li>Histórico de conversa: resetado após 24h de inatividade</li>
     <li>Dados de agendamento: mantidos enquanto a conta estiver ativa</li>
     <li>Dados pessoais: excluídos em até 30 dias após cancelamento da conta</li>
   </ul>
 
-  <h2>9. Cookies</h2>
+  <h2>10. Cookies</h2>
   <p>Usamos apenas cookies essenciais para autenticação no painel (cookie de sessão httpOnly). Não usamos cookies de rastreamento ou publicidade.</p>
 
-  <h2>10. Contato e DPO</h2>
+  <h2>11. Contato e DPO</h2>
   <p>Para dúvidas sobre privacidade ou para exercer seus direitos:<br>
   <strong>Email:</strong> <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a><br>
   Responderemos em até 15 dias úteis.</p>
 
-  <h2>11. Alterações</h2>
+  <h2>12. Alterações</h2>
   <p>Podemos atualizar esta política periodicamente. Notificaremos clientes sobre mudanças significativas por email.</p>
 </div>
 <footer>
@@ -1099,10 +1128,17 @@ footer a:hover{color:#a78bfa}
   <h2>6. Disponibilidade</h2>
   <p>Buscamos 99% de disponibilidade, mas não garantimos funcionamento ininterrupto. Manutenções programadas serão comunicadas com antecedência. Não nos responsabilizamos por indisponibilidades da Evolution API, WhatsApp ou OpenAI.</p>
 
-  <h2>7. Responsabilidade</h2>
-  <ul>
-    <li>Você é responsável pelo conteúdo enviado pelo bot</li>
-    <li>A BotGen não se responsabiliza por agendamentos perdidos por falha do WhatsApp</li>
+  <h2>7. Responsabilidade e Proteção de Dados</h2>
+  <div class="box">
+    <strong>⚖️ Você é o Controlador — nós somos o Operador</strong><br><br>
+    <p style="margin:8px 0 0">Nos termos da LGPD (Lei 13.709/2018), ao usar a BotGen você assume o papel de <strong>Controlador de Dados</strong> em relação aos dados dos seus clientes finais. A BotGen atua como <strong>Operadora</strong>, processando esses dados apenas conforme suas instruções e para fins de prestação do serviço.</p>
+  </div>
+  <ul style="margin-top:14px">
+    <li>Você é responsável por informar seus clientes que utiliza um sistema automatizado de agendamento</li>
+    <li>Você é responsável pela base legal para coleta dos dados dos seus clientes finais</li>
+    <li>Você é responsável pelo conteúdo configurado no bot (nome do negócio, serviços, mensagens)</li>
+    <li>A BotGen não acessa os dados dos seus clientes finais para fins próprios</li>
+    <li>A BotGen não se responsabiliza por agendamentos perdidos por falha do WhatsApp ou Evolution API</li>
     <li>Nossa responsabilidade máxima é limitada ao valor pago no último mês</li>
     <li>Não nos responsabilizamos por danos indiretos ou lucros cessantes</li>
   </ul>
@@ -1119,7 +1155,17 @@ footer a:hover{color:#a78bfa}
   <h2>11. Lei aplicável</h2>
   <p>Estes termos são regidos pelas leis brasileiras. Foro eleito: comarca de São Gonçalo do Pará, MG, com renúncia a qualquer outro.</p>
 
-  <h2>12. Contato</h2>
+  <h2>12. Acordo de Processamento de Dados (DPA)</h2>
+  <p>Ao aceitar estes Termos, você celebra conosco um Acordo de Processamento de Dados (DPA) nos termos do Art. 39 da LGPD, pelo qual:</p>
+  <ul>
+    <li>A BotGen se compromete a processar dados pessoais apenas conforme suas instruções</li>
+    <li>A BotGen implementa medidas técnicas e organizacionais adequadas para proteger os dados</li>
+    <li>A BotGen notificará você em caso de incidente de segurança que afete dados dos seus clientes</li>
+    <li>A BotGen não subcontratará o processamento de dados sem seu conhecimento</li>
+    <li>Ao encerrar o contrato, os dados serão excluídos em até 30 dias</li>
+  </ul>
+
+  <h2>13. Contato</h2>
   <p><a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a></p>
 </div>
 <footer>

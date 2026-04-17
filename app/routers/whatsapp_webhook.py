@@ -293,14 +293,20 @@ async def whatsapp_webhook(request: Request):
             else:
                 slots          = get_available_slots(db, tenant.id, date_str, ai_response.get("service", ""))
                 requested_time = ai_response.get("requested_time", "")
+                available_times = [s["time"] for s in slots]
                 if requested_time:
-                    available_times = [s["time"] for s in slots]
-                    if requested_time in available_times:
-                        reply_text = f"__SLOT_OK__{requested_time}__{date_str}"
+                    # Normaliza requested_time para HH:MM (segurança extra)
+                    try:
+                        parts_t = requested_time.strip().split(":")
+                        req_normalized = f"{int(parts_t[0]):02d}:{int(parts_t[1]):02d}" if len(parts_t) >= 2 else requested_time
+                    except Exception:
+                        req_normalized = requested_time
+                    if req_normalized in available_times:
+                        reply_text = f"__SLOT_OK__{req_normalized}__{date_str}"
                     else:
                         proximos  = available_times[:3] if available_times else []
                         sugestoes = ", ".join(proximos) if proximos else "nenhum"
-                        reply_text = f"__SLOT_OCUPADO__{requested_time}__{date_str}__{sugestoes}"
+                        reply_text = f"__SLOT_OCUPADO__{req_normalized}__{date_str}__{sugestoes}"
                 else:
                     reply_text = format_slots_for_ai(slots, date_str)
 
@@ -346,6 +352,7 @@ async def whatsapp_webhook(request: Request):
 
                     if _already_exists:
                         reply_text = "Ótimo! Seu agendamento já está confirmado 😊 Qualquer dúvida é só chamar!"
+                        conversation.messages = "[]"  # Reseta histórico
                     else:
                         result = create_appointment(
                             db=db,
@@ -397,6 +404,8 @@ async def whatsapp_webhook(request: Request):
 
                         # LGPD: nunca loga endereço
                         print(f"[Agendamento] criado | tenant={tenant.id[:8]} | endereço: {'sim' if pickup_address else 'não'}")
+                        # Reseta histórico após confirmação — evita duplicata se cliente mandar "ok", "certinho" etc.
+                        conversation.messages = "[]"
                     elif not _already_exists:
                         print(f"[Agendamento] ERRO: {result['error']}")
                         reply_text = f"😕 Não consegui confirmar esse horário ({result['error']}). Vamos tentar outro?"
