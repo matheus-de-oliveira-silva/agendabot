@@ -30,7 +30,7 @@ PAYMENT_LABELS = {
 BUSINESS_NO_SUBJECT = {"barbearia", "salao", "estetica", "outro"}
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
-CHECKOUT = {
+CHECKOUT_LINKS = {
     "basico":  "https://pay.kiwify.com.br/ypIXFRM",
     "pro":     "https://pay.kiwify.com.br/pndpF39",
     "agencia": "https://pay.kiwify.com.br/O0oUFkt",
@@ -775,11 +775,13 @@ a.plan-btn{{display:block;padding:14px 20px;border-radius:12px;text-decoration:n
 
     lembretes_info = ""
     if not pode_lembretes:
-        lembretes_info = f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;padding:8px 12px;background:rgba(124,58,237,0.08);border-radius:8px;border-left:3px solid rgba(124,58,237,0.4)">⚠️ Lembretes automáticos disponíveis nos planos Pro e Agência. <a href="{CHECKOUT_LINKS["pro"]}" target="_blank" style="color:#a78bfa;font-weight:700">Fazer upgrade →</a></div>'
+        _url_pro = CHECKOUT_LINKS['pro']
+        lembretes_info = f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;padding:8px 12px;background:rgba(124,58,237,0.08);border-radius:8px;border-left:3px solid rgba(124,58,237,0.4)">⚠️ Lembretes automáticos disponíveis nos planos Pro e Agência. <a href="{_url_pro}" target="_blank" style="color:#a78bfa;font-weight:700">Fazer upgrade →</a></div>'
 
     csv_info = ""
     if not pode_csv:
-        csv_info = f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;padding:8px 12px;background:rgba(124,58,237,0.08);border-radius:8px;border-left:3px solid rgba(124,58,237,0.4)">⚠️ Exportação CSV disponível nos planos Pro e Agência. <a href="{CHECKOUT_LINKS["pro"]}" target="_blank" style="color:#a78bfa;font-weight:700">Fazer upgrade →</a></div>'
+        _url_pro = CHECKOUT_LINKS['pro']
+        csv_info = f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;padding:8px 12px;background:rgba(124,58,237,0.08);border-radius:8px;border-left:3px solid rgba(124,58,237,0.4)">⚠️ Exportação CSV disponível nos planos Pro e Agência. <a href="{_url_pro}" target="_blank" style="color:#a78bfa;font-weight:700">Fazer upgrade →</a></div>'
 
     # Cards upgrade na config
     upgrade_cards_html = ""
@@ -852,7 +854,8 @@ a.plan-btn{{display:block;padding:14px 20px;border-radius:12px;text-decoration:n
     if pode_csv:
         csv_btn_html = f'<a href="/api/export/relatorio?mes={mes_atual}" class="btn-icon" title="Exportar {mes_label}" style="text-decoration:none">📥</a>'
     else:
-        csv_btn_html = f'<a href="{CHECKOUT_LINKS["pro"]}" target="_blank" class="btn-icon" title="CSV disponível no Plano Pro — clique para fazer upgrade" style="opacity:.5">📥</a>'
+        _url_pro = CHECKOUT_LINKS['pro']
+        csv_btn_html = f'<a href="{_url_pro}" target="_blank" class="btn-icon" title="CSV disponível no Plano Pro — clique para fazer upgrade" style="opacity:.5">📥</a>'
 
     # ── HTML PRINCIPAL ────────────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>

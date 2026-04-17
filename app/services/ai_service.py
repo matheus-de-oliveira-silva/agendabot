@@ -1,5 +1,5 @@
 """
-ai_service.py — Motor de IA do AgendaBot SaaS.
+ai_service.py — Motor de IA do BotGen SaaS.
 
 v4 — Humanizacao total + fluxo a prova de erros:
 - Linguagem natural de WhatsApp com abreviacoes reais por tipo de negocio

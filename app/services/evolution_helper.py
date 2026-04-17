@@ -19,7 +19,7 @@ import httpx
 # Variáveis globais — usadas como fallback quando o tenant não tem Evolution própria
 EVOLUTION_API_URL_GLOBAL = os.getenv("EVOLUTION_API_URL", "")
 EVOLUTION_API_KEY_GLOBAL = os.getenv("EVOLUTION_API_KEY", "")
-EVOLUTION_INSTANCE_GLOBAL = os.getenv("EVOLUTION_INSTANCE", "agendabot")
+EVOLUTION_INSTANCE_GLOBAL = os.getenv("EVOLUTION_INSTANCE", "botgen")
 
 
 def get_evolution_config(tenant) -> dict:
