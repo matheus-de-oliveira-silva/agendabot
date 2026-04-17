@@ -350,6 +350,7 @@ async def whatsapp_webhook(request: Request):
                         except Exception:
                             pass
 
+                    result = {"success": False, "error": ""}  # default seguro
                     if _already_exists:
                         reply_text = "Ótimo! Seu agendamento já está confirmado 😊 Qualquer dúvida é só chamar!"
                         conversation.messages = "[]"  # Reseta histórico
