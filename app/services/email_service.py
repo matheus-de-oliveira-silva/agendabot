@@ -21,18 +21,14 @@ LGPD:
 """
 
 import os
-import smtplib
-import asyncio
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+import httpx
 from datetime import datetime
 import pytz
 
-GMAIL_USER     = os.getenv("GMAIL_USER",        "mtdnvendas@gmail.com")
-GMAIL_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "xsjj jtby zzbi jqen")
-APP_URL        = os.getenv("APP_URL", "https://web-production-c1b1c.up.railway.app")
-EMAIL_FROM     = f"BotGen <{GMAIL_USER}>"
-BRASILIA       = pytz.timezone("America/Sao_Paulo")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+EMAIL_FROM       = os.getenv("EMAIL_FROM", "BotGen <mtdnvendas@gmail.com>")
+APP_URL          = os.getenv("APP_URL", "https://web-production-c1b1c.up.railway.app")
+BRASILIA         = pytz.timezone("America/Sao_Paulo")
 
 CHECKOUT_LINKS = {
     "basico":  "https://pay.kiwify.com.br/ypIXFRM",
@@ -161,32 +157,38 @@ def _divider() -> str:
 # ── Envio base ────────────────────────────────────────────────────────────────
 
 async def _send_email(to: str, subject: str, html: str) -> bool:
-    """Envia email via Gmail SMTP. Retorna True se enviado com sucesso."""
-    if not GMAIL_USER or not GMAIL_PASSWORD:
-        print("[Email] GMAIL_USER ou GMAIL_APP_PASSWORD não configurados")
+    """Envia email via SendGrid HTTP API. Retorna True se enviado com sucesso."""
+    if not SENDGRID_API_KEY:
+        print("[Email] SENDGRID_API_KEY não configurada — email não enviado")
         return False
 
     if not to or "@" not in to:
         print("[Email] Endereço inválido — ignorando")
         return False
 
-    def _send_sync():
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = EMAIL_FROM
-        msg["To"]      = to
-        msg.attach(MIMEText(html, "html", "utf-8"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(GMAIL_USER, GMAIL_PASSWORD)
-            smtp.sendmail(GMAIL_USER, to, msg.as_string())
-
     try:
-        await asyncio.get_event_loop().run_in_executor(None, _send_sync)
-        # LGPD: loga apenas os últimos 8 chars do email
-        print(f"[Email] ✅ Enviado | '{subject[:35]}...' | ***{to[-8:]}")
-        return True
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {SENDGRID_API_KEY}",
+                    "Content-Type":  "application/json",
+                },
+                json={
+                    "personalizations": [{"to": [{"email": to}]}],
+                    "from":    {"email": "mtdnvendas@gmail.com", "name": "BotGen"},
+                    "subject": subject,
+                    "content": [{"type": "text/html", "value": html}],
+                },
+            )
+            if resp.status_code == 202:
+                print(f"[Email] ✅ Enviado | '{subject[:35]}...' | ***{to[-8:]}")
+                return True
+            else:
+                print(f"[Email] ❌ Erro SendGrid {resp.status_code}: {resp.text[:120]}")
+                return False
     except Exception as e:
-        print(f"[Email] ❌ Erro Gmail SMTP: {e}")
+        print(f"[Email] ❌ Exceção SendGrid: {e}")
         return False
 
 
