@@ -325,20 +325,42 @@ async def whatsapp_webhook(request: Request):
 
                     pickup_address = ai_response.get("pickup_address") or None
 
-                    result = create_appointment(
-                        db=db,
-                        tenant_id=tenant.id,
-                        customer_id=customer.id,
-                        service_id=service_obj.id,
-                        datetime_str=ai_response.get("datetime", ""),
-                        pet_name=ai_response.get("pet_name"),
-                        pet_breed=ai_response.get("pet_breed"),
-                        pet_weight=ai_response.get("pet_weight"),
-                        pickup_time=ai_response.get("pickup_time"),
-                        pickup_address=pickup_address,
-                    )
+                    # Proteção anti-duplicata: verifica se já existe agendamento
+                    # com mesmo datetime para esse cliente (evita double-booking por
+                    # mensagem de confirmação do cliente como "certinho", "ok", etc.)
+                    datetime_str = ai_response.get("datetime", "")
+                    _already_exists = False
+                    if datetime_str:
+                        try:
+                            from datetime import datetime as _dt
+                            _sched = _dt.fromisoformat(datetime_str)
+                            from ..models import Appointment as _Appt
+                            _already_exists = bool(db.query(_Appt).filter(
+                                _Appt.tenant_id    == tenant.id,
+                                _Appt.customer_id  == customer.id,
+                                _Appt.scheduled_at == _sched,
+                                _Appt.status       != "cancelled"
+                            ).first())
+                        except Exception:
+                            pass
 
-                    if result["success"]:
+                    if _already_exists:
+                        reply_text = "Ótimo! Seu agendamento já está confirmado 😊 Qualquer dúvida é só chamar!"
+                    else:
+                        result = create_appointment(
+                            db=db,
+                            tenant_id=tenant.id,
+                            customer_id=customer.id,
+                            service_id=service_obj.id,
+                            datetime_str=datetime_str,
+                            pet_name=ai_response.get("pet_name"),
+                            pet_breed=ai_response.get("pet_breed"),
+                            pet_weight=ai_response.get("pet_weight"),
+                            pickup_time=ai_response.get("pickup_time"),
+                            pickup_address=pickup_address,
+                        )
+
+                    if not _already_exists and result["success"]:
                         ia_message = ai_response.get("message", "")
                         if ia_message:
                             if pickup_address:
@@ -375,7 +397,7 @@ async def whatsapp_webhook(request: Request):
 
                         # LGPD: nunca loga endereço
                         print(f"[Agendamento] criado | tenant={tenant.id[:8]} | endereço: {'sim' if pickup_address else 'não'}")
-                    else:
+                    elif not _already_exists:
                         print(f"[Agendamento] ERRO: {result['error']}")
                         reply_text = f"😕 Não consegui confirmar esse horário ({result['error']}). Vamos tentar outro?"
 
