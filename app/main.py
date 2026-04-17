@@ -264,7 +264,8 @@ def health():
 
 # ── Página de vendas ──────────────────────────────────────────────────────────
 
-_LANDING_HTML = """<!DOCTYPE html>
+_LANDING_HTML = """
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -851,7 +852,7 @@ _LANDING_HTML = """<!DOCTYPE html>
   <div class="logo">Bot<span>Gen</span></div>
   <p>
     © 2026 BotGen · Agendamento inteligente pelo WhatsApp ·
-    <a href="mailto:contato@botgen.com.br">contato@botgen.com.br</a> ·
+    <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a> ·
     <a href="#">Política de Privacidade</a> ·
     <a href="#">Termos de Uso</a>
   </p>
@@ -873,6 +874,7 @@ _LANDING_HTML = """<!DOCTYPE html>
 </script>
 </body>
 </html>
+
 """
 
 @app.get("/planos", response_class=HTMLResponse)
