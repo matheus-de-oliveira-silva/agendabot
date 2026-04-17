@@ -173,7 +173,9 @@ def get_available_slots(db: Session, tenant_id: str, date_str: str, service_name
         slot_hour = cur // 60
         slot_min  = cur % 60
         slot_time = date.replace(hour=slot_hour, minute=slot_min, second=0, microsecond=0)
-        if date.date() == now.date() and slot_time <= now + timedelta(minutes=30):
+        # Comparação segura sem timezone (naive vs naive)
+        now_naive = now.replace(tzinfo=None)
+        if date.date() == now_naive.date() and slot_time <= now_naive + timedelta(minutes=30):
             cur += 30; continue
         time_str = slot_time.strftime("%H:%M")
         if time_str not in ocupados:
@@ -244,7 +246,8 @@ def create_appointment(
         return {"success": False, "error": "Data inválida"}
 
     now = agora_brasilia()
-    if scheduled_at <= now:
+    now_naive = now.replace(tzinfo=None)
+    if scheduled_at <= now_naive:
         return {"success": False, "error": "Horário já passou"}
 
     date_str = scheduled_at.strftime("%Y-%m-%d")
