@@ -264,31 +264,621 @@ def health():
 
 # ── Página de vendas ──────────────────────────────────────────────────────────
 
+_LANDING_HTML = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BotGen — Seu WhatsApp agendando sozinho com IA</title>
+  <meta name="description" content="Automatize os agendamentos do seu negócio pelo WhatsApp com inteligência artificial. Sem app, sem complicação. Ativo em 15 minutos.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,700;0,800;0,900;1,800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --purple: #7c3aed;
+      --purple2: #6d28d9;
+      --glow: rgba(124,58,237,0.4);
+      --green: #10b981;
+      --bg: #080810;
+      --card: #0e0e1c;
+      --border: rgba(255,255,255,0.07);
+      --text: #f1f5f9;
+      --muted: #64748b;
+      --muted2: #94a3b8;
+    }
+
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 5%; height: 60px;
+      background: rgba(8,8,16,0.85); backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo { font-size: 20px; font-weight: 900; letter-spacing: -0.5px; }
+    .nav-logo span { color: #a78bfa; }
+    .nav-cta {
+      background: var(--purple); color: #fff; text-decoration: none;
+      padding: 8px 20px; border-radius: 8px; font-weight: 700; font-size: 13px;
+      transition: background .2s;
+    }
+    .nav-cta:hover { background: var(--purple2); }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      text-align: center; padding: 100px 5% 60px;
+      position: relative;
+    }
+    .hero::before {
+      content: ''; position: absolute; inset: 0; z-index: 0;
+      background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(124,58,237,0.18) 0%, transparent 70%);
+    }
+    .hero-inner { position: relative; z-index: 1; max-width: 780px; margin: 0 auto; }
+    .hero-badge {
+      display: inline-block; background: rgba(124,58,237,0.12);
+      border: 1px solid rgba(124,58,237,0.35); color: #a78bfa;
+      padding: 5px 16px; border-radius: 20px; font-size: 12px; font-weight: 700;
+      letter-spacing: 1px; text-transform: uppercase; margin-bottom: 28px;
+    }
+    h1 {
+      font-size: clamp(40px, 7vw, 80px); font-weight: 900; line-height: 1.05;
+      letter-spacing: -2px; color: #fff; margin-bottom: 22px;
+    }
+    h1 em { font-style: italic; color: #a78bfa; }
+    .hero-sub {
+      font-size: clamp(16px, 2.5vw, 19px); color: var(--muted2);
+      max-width: 540px; margin: 0 auto 40px; line-height: 1.7;
+    }
+    .hero-ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 48px; }
+    .btn-big {
+      padding: 16px 36px; border-radius: 12px; font-weight: 800;
+      font-size: 16px; text-decoration: none; transition: all .2s; display: inline-block;
+    }
+    .btn-big-primary { background: var(--purple); color: #fff; box-shadow: 0 0 30px var(--glow); }
+    .btn-big-primary:hover { background: var(--purple2); transform: translateY(-2px); box-shadow: 0 0 40px var(--glow); }
+    .btn-big-ghost { background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid var(--border); }
+    .btn-big-ghost:hover { background: rgba(255,255,255,0.1); }
+    .hero-social { font-size: 14px; color: var(--muted); }
+    .hero-social strong { color: var(--muted2); }
+
+    /* ── STATS ── */
+    .stats-strip {
+      display: flex; justify-content: center; gap: 0;
+      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .stat-item {
+      flex: 1; min-width: 160px; padding: 28px 20px; text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .stat-item:last-child { border-right: none; }
+    .stat-num { font-size: 36px; font-weight: 900; color: #fff; letter-spacing: -1px; }
+    .stat-num span { color: var(--purple); }
+    .stat-label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+    /* ── SECTIONS ── */
+    section { padding: 80px 5%; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    .section-eyebrow {
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;
+      color: #a78bfa; margin-bottom: 12px;
+    }
+    h2 { font-size: clamp(28px, 4vw, 46px); font-weight: 900; color: #fff; letter-spacing: -1px; line-height: 1.1; margin-bottom: 14px; }
+    .section-sub { font-size: 17px; color: var(--muted2); margin-bottom: 52px; max-width: 520px; }
+
+    /* ── NEGÓCIOS ── */
+    .biz-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+    .biz-chip {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--card); border: 1px solid var(--border);
+      padding: 10px 16px; border-radius: 30px; font-size: 14px; font-weight: 500;
+      transition: border-color .2s;
+    }
+    .biz-chip:hover { border-color: rgba(124,58,237,0.4); }
+
+    /* ── CHAT DEMO ── */
+    .demo-section { background: linear-gradient(180deg, var(--bg) 0%, rgba(124,58,237,0.05) 50%, var(--bg) 100%); }
+    .demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
+    @media(max-width:768px) { .demo-grid { grid-template-columns: 1fr; } }
+    .chat-wrap {
+      background: #0a0a14; border-radius: 20px; overflow: hidden;
+      border: 1px solid var(--border); max-width: 360px; margin: 0 auto;
+      box-shadow: 0 0 60px rgba(124,58,237,0.15);
+    }
+    .chat-top {
+      background: #13131f; padding: 14px 16px;
+      display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border);
+    }
+    .chat-av {
+      width: 36px; height: 36px; background: var(--purple);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px;
+    }
+    .chat-av-name { font-size: 14px; font-weight: 700; }
+    .chat-av-status { font-size: 11px; color: #4ade80; }
+    .chat-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #0d0d1a; }
+    .msg { max-width: 82%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.55; }
+    .msg-in  { background: #1a1a2e; color: var(--text); align-self: flex-start; border-radius: 4px 12px 12px 12px; }
+    .msg-out { background: var(--purple); color: #fff; align-self: flex-end; border-radius: 12px 4px 12px 12px; }
+    .msg-time { font-size: 10px; color: var(--muted); text-align: right; margin-top: 4px; opacity: .6; }
+
+    /* ── FEATURES ── */
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap: 18px; }
+    .feature-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px;
+      transition: border-color .2s, transform .2s;
+    }
+    .feature-card:hover { border-color: rgba(124,58,237,0.35); transform: translateY(-3px); }
+    .feature-icon {
+      width: 46px; height: 46px; background: rgba(124,58,237,0.12);
+      border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      font-size: 22px; margin-bottom: 16px;
+    }
+    .feature-card h3 { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+    .feature-card p { font-size: 14px; color: var(--muted2); line-height: 1.7; }
+
+    /* ── PLANOS ── */
+    .plans-section { background: rgba(124,58,237,0.03); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .plans-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 20px; }
+    .plan-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 32px 26px;
+      position: relative; transition: transform .2s, border-color .2s;
+    }
+    .plan-card:hover { transform: translateY(-4px); }
+    .plan-card.best { border-color: var(--purple); box-shadow: 0 0 40px rgba(124,58,237,0.2); }
+    .plan-pill {
+      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+      background: var(--purple); color: #fff; font-size: 11px; font-weight: 800;
+      padding: 4px 14px; border-radius: 20px; white-space: nowrap; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .plan-name { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+    .plan-price { font-size: 46px; font-weight: 900; color: #fff; line-height: 1; letter-spacing: -2px; }
+    .plan-price sup { font-size: 20px; font-weight: 700; vertical-align: top; margin-top: 10px; }
+    .plan-price sub { font-size: 15px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+    .plan-desc { font-size: 14px; color: var(--muted2); margin: 12px 0 24px; line-height: 1.6; }
+    .plan-features { list-style: none; margin-bottom: 28px; }
+    .plan-features li {
+      font-size: 13px; color: var(--text); padding: 8px 0;
+      border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 10px;
+    }
+    .plan-features li:last-child { border-bottom: none; }
+    .plan-features li .ok  { color: var(--green); font-weight: 800; flex-shrink: 0; }
+    .plan-features li .no  { color: var(--muted); flex-shrink: 0; }
+    .plan-features li.off  { color: var(--muted); }
+    .plan-btn {
+      display: block; text-align: center; text-decoration: none;
+      padding: 14px; border-radius: 12px; font-weight: 800; font-size: 15px; transition: all .2s;
+    }
+    .plan-btn-purple { background: var(--purple); color: #fff; }
+    .plan-btn-purple:hover { background: var(--purple2); }
+    .plan-card.best .plan-btn { background: #fff; color: var(--purple2); }
+    .plan-card.best .plan-btn:hover { background: #f0f0ff; }
+    .plan-btn-outline { background: transparent; color: var(--muted2); border: 1px solid var(--border); }
+    .plan-btn-outline:hover { border-color: rgba(124,58,237,0.4); color: #a78bfa; }
+    .guarantee {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25);
+      border-radius: 10px; padding: 10px 20px; font-size: 13px; color: #34d399;
+      margin-top: 28px;
+    }
+
+    /* ── COMO FUNCIONA ── */
+    .steps-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 20px; }
+    .step-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 26px;
+    }
+    .step-num {
+      width: 36px; height: 36px; background: var(--purple); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 16px; margin-bottom: 14px;
+    }
+    .step-card h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+    .step-card p { font-size: 13px; color: var(--muted2); line-height: 1.7; }
+
+    /* ── FAQ ── */
+    .faq-list { max-width: 700px; margin: 0 auto; }
+    .faq-item { border-bottom: 1px solid var(--border); }
+    .faq-q {
+      width: 100%; background: none; border: none; color: var(--text);
+      font-family: 'Inter',sans-serif; font-size: 15px; font-weight: 600;
+      padding: 20px 0; text-align: left; cursor: pointer; display: flex;
+      justify-content: space-between; align-items: center; gap: 16px;
+    }
+    .faq-q .ico { color: #a78bfa; font-size: 20px; transition: transform .2s; flex-shrink: 0; }
+    .faq-a { font-size: 14px; color: var(--muted2); line-height: 1.8; padding-bottom: 18px; display: none; }
+    .faq-item.open .faq-a { display: block; }
+    .faq-item.open .faq-q .ico { transform: rotate(45deg); }
+
+    /* ── CTA FINAL ── */
+    .cta-section {
+      text-align: center; padding: 100px 5%;
+      background: radial-gradient(ellipse 80% 60% at 50% 100%, rgba(124,58,237,0.2) 0%, transparent 70%);
+    }
+    .cta-section h2 { margin-bottom: 14px; }
+    .cta-section p { color: var(--muted2); font-size: 18px; margin-bottom: 40px; max-width: 500px; margin-left: auto; margin-right: auto; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border); padding: 28px 5%;
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 12px;
+    }
+    footer .logo { font-size: 16px; font-weight: 900; }
+    footer .logo span { color: #a78bfa; }
+    footer p { font-size: 12px; color: var(--muted); }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: #a78bfa; }
+
+    @media(max-width:600px) {
+      .stats-strip { flex-direction: column; }
+      .stat-item { border-right: none; border-bottom: 1px solid var(--border); }
+      footer { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">Bot<span>Gen</span></div>
+  <a href="#planos" class="nav-cta">Ver planos →</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-badge">⚡ powered by gpt-4o</div>
+    <h1>Seu WhatsApp<br>agendando <em>sozinho</em></h1>
+    <p class="hero-sub">
+      IA que fala como atendente de verdade, verifica horários em tempo real e confirma agendamentos — 24h por dia, sem você precisar responder nada.
+    </p>
+    <div class="hero-ctas">
+      <a href="#planos" class="btn-big btn-big-primary">Quero ativar agora →</a>
+      <a href="#como-funciona" class="btn-big btn-big-ghost">Ver como funciona</a>
+    </div>
+    <div class="hero-social">
+      Usado por <strong>barbearias, pet shops, salões</strong> e mais de <strong>50 outros negócios</strong>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats-strip">
+  <div class="stat-item">
+    <div class="stat-num">+<span>200</span></div>
+    <div class="stat-label">Negócios atendidos</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-num">+<span>15k</span></div>
+    <div class="stat-label">Agendamentos realizados</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-num"><span>15</span>min</div>
+    <div class="stat-label">Para ativar o bot</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-num"><span>24</span>h</div>
+    <div class="stat-label">Por dia, 7 dias por semana</div>
+  </div>
+</div>
+
+<!-- NEGÓCIOS -->
+<section>
+  <div class="container">
+    <div class="section-eyebrow">Compatível com</div>
+    <h2 style="margin-bottom:24px">Funciona para qualquer<br>negócio de agendamento</h2>
+    <div class="biz-grid">
+      <div class="biz-chip">💈 Barbearia</div>
+      <div class="biz-chip">🐾 Pet Shop</div>
+      <div class="biz-chip">💅 Salão de Beleza</div>
+      <div class="biz-chip">✨ Estética</div>
+      <div class="biz-chip">🏥 Clínica Veterinária</div>
+      <div class="biz-chip">🦷 Odontologia</div>
+      <div class="biz-chip">💆 Spa & Massagem</div>
+      <div class="biz-chip">⚙️ Outros</div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO -->
+<section class="demo-section">
+  <div class="container">
+    <div class="demo-grid">
+      <div>
+        <div class="section-eyebrow">Experiência real</div>
+        <h2>Seus clientes vão achar que é uma atendente de verdade</h2>
+        <p style="color:var(--muted2);font-size:16px;line-height:1.7;margin:16px 0 28px">
+          A IA foi treinada para falar de forma natural — usa o nome do cliente, lembra de agendamentos anteriores e trata cada tipo de negócio com o tom certo.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;gap:10px;font-size:14px;color:var(--text)"><span style="color:var(--green);font-weight:800">✓</span> Personalidade adaptada ao seu tipo de negócio</div>
+          <div style="display:flex;gap:10px;font-size:14px;color:var(--text)"><span style="color:var(--green);font-weight:800">✓</span> Verifica disponibilidade em tempo real</div>
+          <div style="display:flex;gap:10px;font-size:14px;color:var(--text)"><span style="color:var(--green);font-weight:800">✓</span> Nunca agenda em feriados</div>
+          <div style="display:flex;gap:10px;font-size:14px;color:var(--text)"><span style="color:var(--green);font-weight:800">✓</span> Lembra clientes recorrentes e seus pets</div>
+          <div style="display:flex;gap:10px;font-size:14px;color:var(--text)"><span style="color:var(--green);font-weight:800">✓</span> Notifica você a cada agendamento confirmado</div>
+        </div>
+      </div>
+      <div>
+        <div class="chat-wrap">
+          <div class="chat-top">
+            <div class="chat-av">🐾</div>
+            <div>
+              <div class="chat-av-name">Mari — PetShop BotGen</div>
+              <div class="chat-av-status">● online agora</div>
+            </div>
+          </div>
+          <div class="chat-body">
+            <div class="msg msg-in">oi! queria marcar banho pro meu cachorro</div>
+            <div class="msg msg-out">Oi! 😊 Me fala seu nome pra eu anotar aqui?</div>
+            <div class="msg msg-in">Lucas</div>
+            <div class="msg msg-out">Oi Lucas! Qual o nome e raça do seu bichinho? 🐾</div>
+            <div class="msg msg-in">Thor, labrador</div>
+            <div class="msg msg-out">Que gracinha! 🐶 Peso aproximado do Thor?</div>
+            <div class="msg msg-in">uns 30kg</div>
+            <div class="msg msg-out">Perfeito! Sexta tem horário às 10h — tá bom?</div>
+            <div class="msg msg-in">sim!</div>
+            <div class="msg msg-out">
+              Confirmado! 🐾✨<br><br>
+              ✂️ Banho — R$60,00<br>
+              📅 Sexta, 18/04 às 10:00<br><br>
+              Thor vai ficar um princesinho! Até lá 😄
+            </div>
+            <div class="msg-time">hoje</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMO FUNCIONA -->
+<section id="como-funciona">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:48px">
+      <div class="section-eyebrow">Processo</div>
+      <h2>Do pagamento ao bot ativo<br>em menos de 15 minutos</h2>
+    </div>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <h3>Você escolhe o plano</h3>
+        <p>Paga pelo checkout seguro da Kiwify e recebe confirmação imediata por WhatsApp e email.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <h3>Chamada de 15 min</h3>
+        <p>Nossa equipe liga, conecta seu WhatsApp Business e configura o bot ao vivo com você.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <h3>Bot no ar</h3>
+        <p>Seus clientes já agendam. Você recebe notificação de cada agendamento confirmado.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <h3>Acompanhe no painel</h3>
+        <p>Dashboard com todos os agendamentos, histórico de clientes e relatórios. Acesse pelo celular.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section style="background:var(--card);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:48px">
+      <div class="section-eyebrow">Recursos</div>
+      <h2>Tudo incluso em todos os planos</h2>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🤖</div>
+        <h3>IA com personalidade</h3>
+        <p>Barbearia fala de forma descontraída, clínica com tom profissional. A IA se adapta ao seu negócio.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📅</div>
+        <h3>Agenda em tempo real</h3>
+        <p>Verifica disponibilidade, bloqueia horários e nunca marca dois clientes no mesmo horário.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔔</div>
+        <h3>Notificação imediata</h3>
+        <p>WhatsApp para você a cada agendamento confirmado, com nome do cliente, serviço e horário.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Dashboard completo</h3>
+        <p>Agenda do dia, histórico, clientes, faturamento e controle de pagamentos em um lugar só.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⏰</div>
+        <h3>Lembretes automáticos</h3>
+        <p>Bot lembra seus clientes um dia antes. Reduz faltas e aumenta a receita. (Pro e Agência)</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <h3>Seguro e na lei</h3>
+        <p>HTTPS obrigatório, dados isolados por negócio, sem logs de mensagens. 100% LGPD.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PLANOS -->
+<section id="planos" class="plans-section">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:52px">
+      <div class="section-eyebrow">Preços</div>
+      <h2>Planos simples e transparentes</h2>
+      <p style="color:var(--muted2);font-size:17px;margin-top:10px">Todos incluem ativação gratuita e suporte pelo WhatsApp.</p>
+    </div>
+
+    <div class="plans-grid">
+
+      <!-- BÁSICO -->
+      <div class="plan-card">
+        <div class="plan-name">Básico</div>
+        <div class="plan-price"><sup>R$</sup>97<sub>,90/mês</sub></div>
+        <div class="plan-desc">Para quem quer começar a automatizar sem complicação.</div>
+        <ul class="plan-features">
+          <li><span class="ok">✓</span> Bot de agendamento pelo WhatsApp</li>
+          <li><span class="ok">✓</span> Até 7 serviços cadastrados</li>
+          <li><span class="ok">✓</span> Painel de agendamentos</li>
+          <li><span class="ok">✓</span> Notificação de cada agendamento</li>
+          <li><span class="ok">✓</span> Ativação em até 2 horas</li>
+          <li class="off"><span class="no">✗</span> Lembretes automáticos</li>
+          <li class="off"><span class="no">✗</span> Exportação CSV</li>
+          <li class="off"><span class="no">✗</span> Relatório semanal por email</li>
+        </ul>
+        <a href="https://pay.kiwify.com.br/ypIXFRM" class="plan-btn plan-btn-outline" target="_blank">Assinar Básico →</a>
+      </div>
+
+      <!-- PRO (destaque) -->
+      <div class="plan-card best">
+        <div class="plan-pill">⭐ MAIS POPULAR</div>
+        <div class="plan-name">Pro</div>
+        <div class="plan-price"><sup>R$</sup>197<sub>,90/mês</sub></div>
+        <div class="plan-desc">Para negócios que querem escalar com automação completa.</div>
+        <ul class="plan-features">
+          <li><span class="ok">✓</span> Tudo do Básico</li>
+          <li><span class="ok">✓</span> Serviços ilimitados</li>
+          <li><span class="ok">✓</span> Lembretes automáticos no dia anterior</li>
+          <li><span class="ok">✓</span> Exportação de agendamentos CSV</li>
+          <li><span class="ok">✓</span> Relatório semanal por email</li>
+          <li><span class="ok">✓</span> Suporte prioritário</li>
+        </ul>
+        <a href="https://pay.kiwify.com.br/pndpF39" class="plan-btn" target="_blank">Assinar Pro →</a>
+      </div>
+
+      <!-- AGÊNCIA -->
+      <div class="plan-card">
+        <div class="plan-name">Agência</div>
+        <div class="plan-price"><sup>R$</sup>497<sub>,90/mês</sub></div>
+        <div class="plan-desc">Para quem gerencia múltiplos negócios ou quer revender.</div>
+        <ul class="plan-features">
+          <li><span class="ok">✓</span> Tudo do Pro</li>
+          <li><span class="ok">✓</span> Até 3 negócios no mesmo plano</li>
+          <li><span class="ok">✓</span> Painel separado por negócio</li>
+          <li><span class="ok">✓</span> Ideal para revendedores</li>
+          <li><span class="ok">✓</span> Suporte VIP pelo WhatsApp</li>
+        </ul>
+        <a href="https://pay.kiwify.com.br/O0oUFkt" class="plan-btn plan-btn-purple" target="_blank">Assinar Agência →</a>
+      </div>
+
+    </div>
+
+    <div style="text-align:center">
+      <div class="guarantee">🛡️ Satisfação garantida — se não funcionar na sua operação, devolvemos</div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section>
+  <div class="container">
+    <div style="text-align:center;margin-bottom:48px">
+      <div class="section-eyebrow">Dúvidas</div>
+      <h2>Perguntas frequentes</h2>
+    </div>
+    <div class="faq-list">
+
+      <div class="faq-item">
+        <button class="faq-q">Preciso ter WhatsApp Business? <span class="ico">+</span></button>
+        <div class="faq-a">Sim, você precisa do WhatsApp Business instalado no celular do seu negócio. É gratuito e funciona no mesmo número que você já usa. Na chamada de ativação a gente te ajuda a configurar tudo.</div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q">Meus clientes precisam instalar algum app? <span class="ico">+</span></button>
+        <div class="faq-a">Não. Seus clientes agendam pelo WhatsApp normal — o que todo mundo já tem. É só mandar mensagem para o número do seu negócio e o bot responde automaticamente.</div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q">O bot funciona 24 horas por dia? <span class="ico">+</span></button>
+        <div class="faq-a">Sim! O bot atende e agenda 24h por dia, 7 dias por semana. Você configura os horários de funcionamento e o bot só aceita agendamentos dentro desses horários — mas responde dúvidas a qualquer hora.</div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q">Posso cancelar quando quiser? <span class="ico">+</span></button>
+        <div class="faq-a">Sim. Cancele a qualquer momento pela Kiwify. Seu bot continua ativo até o fim do período pago e seus dados ficam preservados por 30 dias após o cancelamento.</div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q">Meus dados e dos clientes estão seguros? <span class="ico">+</span></button>
+        <div class="faq-a">Sim. HTTPS obrigatório em todas as rotas, senhas criptografadas com bcrypt, webhook com assinatura HMAC-SHA1 e isolamento total por negócio. Desenvolvido em conformidade com a LGPD.</div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q">E se eu tiver mais de um negócio? <span class="ico">+</span></button>
+        <div class="faq-a">O Plano Agência (R$497,90/mês) inclui até 3 negócios diferentes no mesmo plano — cada um com seu próprio bot, painel e número de WhatsApp.</div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q">Quanto tempo demora para ativar? <span class="ico">+</span></button>
+        <div class="faq-a">Nossa equipe entra em contato em até 2 horas após a compra. A ativação em si leva apenas 15 minutos numa chamada rápida.</div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q">Como é feito o processo de entrega? <span class="ico">+</span></button>
+        <div class="faq-a">Imediatamente após a compra você recebe um WhatsApp e um email de boas-vindas. Nossa equipe entra em contato em até 2 horas para agendar a chamada de ativação. Não há nada para baixar — tudo é configurado ao vivo pela nossa equipe diretamente no seu WhatsApp Business.</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- CTA FINAL -->
+<section class="cta-section">
+  <div class="container">
+    <div class="section-eyebrow">Comece hoje</div>
+    <h2>Pare de responder<br>agendamentos à mão</h2>
+    <p>Ative o BotGen em 15 minutos e tenha uma atendente que nunca dorme, nunca erra e nunca reclama.</p>
+    <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+      <a href="https://pay.kiwify.com.br/ypIXFRM" class="btn-big btn-big-ghost" target="_blank">Básico — R$97,90</a>
+      <a href="https://pay.kiwify.com.br/pndpF39" class="btn-big btn-big-primary" target="_blank">Pro — R$197,90 ⭐</a>
+    </div>
+    <div class="guarantee" style="margin-top:28px">🛡️ Satisfação garantida — sem letras miúdas</div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="logo">Bot<span>Gen</span></div>
+  <p>
+    © 2026 BotGen · Agendamento inteligente pelo WhatsApp ·
+    <a href="mailto:contato@botgen.com.br">contato@botgen.com.br</a> ·
+    <a href="#">Política de Privacidade</a> ·
+    <a href="#">Termos de Uso</a>
+  </p>
+  <p style="font-size:11px;color:var(--muted)">Conforme LGPD (Lei 13.709/2018)</p>
+</footer>
+
+<script>
+  document.querySelectorAll('.faq-item .faq-q').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.closest('.faq-item').classList.toggle('open');
+    });
+  });
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      const t = document.querySelector(a.getAttribute('href'));
+      if (t) { e.preventDefault(); t.scrollIntoView({behavior:'smooth'}); }
+    });
+  });
+</script>
+</body>
+</html>
+"""
+
 @app.get("/planos", response_class=HTMLResponse)
 async def landing_page():
-    """Serve a landing page de vendas."""
-    # FIX: busca em múltiplos paths para compatibilidade Railway + local
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "landing.html"),
-        os.path.join(os.getcwd(), "landing.html"),
-        "/app/landing.html",
-        "landing.html",
-    ]
-    for path in possible_paths:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-    # Fallback redirect se não achar o arquivo
-    return HTMLResponse("""<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>BotGen — Agendamento pelo WhatsApp com IA</title>
-    <style>body{font-family:sans-serif;background:#0f0f1a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}</style>
-    </head><body>
-    <div>
-        <h1 style="font-size:32px;font-weight:800;margin-bottom:12px">BotGen ⚡</h1>
-        <p style="color:#94a3b8;margin-bottom:24px">Agendamento automático pelo WhatsApp com IA</p>
-        <a href="https://pay.kiwify.com.br/pndpF39" style="background:#7c3aed;color:#fff;padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:700">Ver Planos</a>
-    </div>
-    </body></html>""")
+    """Página de vendas BotGen — HTML embutido para funcionar em qualquer ambiente."""
+    return HTMLResponse(content=_LANDING_HTML)
 
 
 # ── Rotas de teste (admin only) ───────────────────────────────────────────────
