@@ -198,7 +198,6 @@ async def reminder_loop():
 async def weekly_report_loop():
     """Relatório semanal — toda segunda às 8h."""
     # FIX: import direto de email_service + scheduler, sem conflito
-    from .services.email_service import email_relatorio_semanal
     from .services.scheduler import send_weekly_reports
     from datetime import datetime, timedelta
     import pytz
@@ -853,8 +852,8 @@ _LANDING_HTML = """
   <p>
     © 2026 BotGen · Agendamento inteligente pelo WhatsApp ·
     <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a> ·
-    <a href="#">Política de Privacidade</a> ·
-    <a href="#">Termos de Uso</a>
+    <a href="/privacidade">Política de Privacidade</a> ·
+    <a href="/termos">Termos de Uso</a>
   </p>
   <p style="font-size:11px;color:var(--muted)">Conforme LGPD (Lei 13.709/2018)</p>
 </footer>
@@ -882,6 +881,258 @@ async def landing_page():
     """Página de vendas BotGen — HTML embutido para funcionar em qualquer ambiente."""
     return HTMLResponse(content=_LANDING_HTML)
 
+
+
+
+# ── Política de Privacidade ───────────────────────────────────────────────────
+
+_PRIVACIDADE_HTML = """<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Política de Privacidade — BotGen</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:#0f0f1a;color:#e2e8f0;line-height:1.8}
+.header{background:#13151f;padding:0 5%;height:56px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.07);position:sticky;top:0;z-index:10}
+.logo{font-size:18px;font-weight:800;color:#fff}.logo span{color:#a78bfa}
+.back{color:#94a3b8;text-decoration:none;font-size:13px}.back:hover{color:#a78bfa}
+.container{max-width:780px;margin:0 auto;padding:48px 5% 80px}
+h1{font-size:28px;font-weight:800;color:#fff;margin-bottom:8px}
+.updated{font-size:13px;color:#64748b;margin-bottom:40px}
+h2{font-size:18px;font-weight:700;color:#a78bfa;margin:36px 0 12px}
+p{color:#94a3b8;margin-bottom:14px;font-size:15px}
+ul{color:#94a3b8;padding-left:20px;margin-bottom:14px;font-size:15px}
+li{margin-bottom:6px}
+strong{color:#e2e8f0}
+a{color:#a78bfa}
+.box{background:#1a1a2e;border:1px solid rgba(124,58,237,0.2);border-radius:12px;padding:20px 24px;margin:20px 0}
+footer{text-align:center;padding:32px 5%;border-top:1px solid rgba(255,255,255,0.07);font-size:13px;color:#475569}
+footer a{color:#64748b;text-decoration:none;margin:0 8px}
+footer a:hover{color:#a78bfa}
+</style>
+</head><body>
+<div class="header">
+  <div class="logo">Bot<span>Gen</span></div>
+  <a href="/planos" class="back">← Voltar</a>
+</div>
+<div class="container">
+  <h1>Política de Privacidade</h1>
+  <div class="updated">Última atualização: abril de 2026</div>
+
+  <p>A BotGen ("nós", "nosso") está comprometida com a proteção dos seus dados pessoais em conformidade com a <strong>Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018)</strong>. Esta política explica como coletamos, usamos e protegemos suas informações.</p>
+
+  <h2>1. Quem somos</h2>
+  <p>A BotGen é um serviço de automação de agendamentos pelo WhatsApp com inteligência artificial, voltado para pequenos negócios brasileiros. Nosso contato: <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a>.</p>
+
+  <h2>2. Dados que coletamos</h2>
+  <p><strong>Dados dos nossos clientes (donos de negócio):</strong></p>
+  <ul>
+    <li>Nome e email fornecidos na compra (via Kiwify)</li>
+    <li>Número de WhatsApp para notificações</li>
+    <li>Dados do negócio: nome, horários, serviços</li>
+  </ul>
+  <p><strong>Dados dos clientes finais (usuários do WhatsApp):</strong></p>
+  <ul>
+    <li>Nome e número de telefone (fornecidos voluntariamente no chat)</li>
+    <li>Dados dos agendamentos: data, serviço, informações do pet (quando aplicável)</li>
+    <li>Histórico de conversa (limitado a 20 mensagens, resetado após 24h de inatividade)</li>
+  </ul>
+
+  <h2>3. Como usamos os dados</h2>
+  <ul>
+    <li>Realizar e gerenciar agendamentos pelo WhatsApp</li>
+    <li>Enviar lembretes de agendamento (planos Pro e Agência)</li>
+    <li>Notificar o dono do negócio sobre novos agendamentos</li>
+    <li>Enviar emails transacionais (confirmação de compra, relatórios)</li>
+    <li>Melhorar a qualidade do serviço</li>
+  </ul>
+
+  <h2>4. Base legal (LGPD)</h2>
+  <ul>
+    <li><strong>Execução de contrato</strong> (Art. 7º, V): processamento necessário para prestação do serviço</li>
+    <li><strong>Legítimo interesse</strong> (Art. 7º, IX): notificações operacionais do serviço</li>
+    <li><strong>Consentimento</strong> (Art. 7º, I): ao iniciar uma conversa com o bot, o usuário consente com o processamento para fins de agendamento</li>
+  </ul>
+
+  <h2>5. Compartilhamento de dados</h2>
+  <p>Não vendemos nem compartilhamos seus dados com terceiros, exceto:</p>
+  <ul>
+    <li><strong>Kiwify</strong>: processamento de pagamentos</li>
+    <li><strong>OpenAI</strong>: processamento das mensagens de chat para geração de respostas (sem armazenamento pela OpenAI)</li>
+    <li><strong>SendGrid</strong>: envio de emails transacionais</li>
+    <li><strong>Railway</strong>: infraestrutura de hospedagem</li>
+  </ul>
+  <p>Todos os parceiros são contratualmente obrigados a proteger seus dados.</p>
+
+  <h2>6. Segurança</h2>
+  <div class="box">
+    <ul>
+      <li>Comunicação criptografada via HTTPS em todas as rotas</li>
+      <li>Senhas armazenadas com bcrypt (hash irreversível)</li>
+      <li>Isolamento total entre clientes — nenhum negócio acessa dados de outro</li>
+      <li>Mensagens do WhatsApp nunca armazenadas em texto plano nos logs</li>
+      <li>Tokens de acesso gerados com entropia criptográfica</li>
+    </ul>
+  </div>
+
+  <h2>7. Seus direitos (LGPD)</h2>
+  <p>Como titular dos dados, você tem direito a:</p>
+  <ul>
+    <li><strong>Acesso</strong>: solicitar cópia dos seus dados</li>
+    <li><strong>Correção</strong>: corrigir dados incompletos ou incorretos</li>
+    <li><strong>Exclusão</strong>: solicitar a exclusão dos seus dados</li>
+    <li><strong>Portabilidade</strong>: receber seus dados em formato estruturado</li>
+    <li><strong>Revogação do consentimento</strong>: a qualquer momento</li>
+    <li><strong>Oposição</strong>: opor-se ao tratamento em determinadas circunstâncias</li>
+  </ul>
+  <p>Para exercer seus direitos, entre em contato: <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a></p>
+
+  <h2>8. Retenção de dados</h2>
+  <ul>
+    <li>Histórico de conversa: resetado após 24h de inatividade</li>
+    <li>Dados de agendamento: mantidos enquanto a conta estiver ativa</li>
+    <li>Dados pessoais: excluídos em até 30 dias após cancelamento da conta</li>
+  </ul>
+
+  <h2>9. Cookies</h2>
+  <p>Usamos apenas cookies essenciais para autenticação no painel (cookie de sessão httpOnly). Não usamos cookies de rastreamento ou publicidade.</p>
+
+  <h2>10. Contato e DPO</h2>
+  <p>Para dúvidas sobre privacidade ou para exercer seus direitos:<br>
+  <strong>Email:</strong> <a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a><br>
+  Responderemos em até 15 dias úteis.</p>
+
+  <h2>11. Alterações</h2>
+  <p>Podemos atualizar esta política periodicamente. Notificaremos clientes sobre mudanças significativas por email.</p>
+</div>
+<footer>
+  © 2026 BotGen ·
+  <a href="/planos">Página inicial</a> ·
+  <a href="/termos">Termos de Uso</a> ·
+  <a href="mailto:mtdnvendas@gmail.com">Contato</a>
+</footer>
+</body></html>"""
+
+@app.get("/privacidade", response_class=HTMLResponse)
+async def privacidade():
+    return HTMLResponse(content=_PRIVACIDADE_HTML)
+
+
+# ── Termos de Uso ─────────────────────────────────────────────────────────────
+
+_TERMOS_HTML = """<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Termos de Uso — BotGen</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:#0f0f1a;color:#e2e8f0;line-height:1.8}
+.header{background:#13151f;padding:0 5%;height:56px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.07);position:sticky;top:0;z-index:10}
+.logo{font-size:18px;font-weight:800;color:#fff}.logo span{color:#a78bfa}
+.back{color:#94a3b8;text-decoration:none;font-size:13px}.back:hover{color:#a78bfa}
+.container{max-width:780px;margin:0 auto;padding:48px 5% 80px}
+h1{font-size:28px;font-weight:800;color:#fff;margin-bottom:8px}
+.updated{font-size:13px;color:#64748b;margin-bottom:40px}
+h2{font-size:18px;font-weight:700;color:#a78bfa;margin:36px 0 12px}
+p{color:#94a3b8;margin-bottom:14px;font-size:15px}
+ul{color:#94a3b8;padding-left:20px;margin-bottom:14px;font-size:15px}
+li{margin-bottom:6px}
+strong{color:#e2e8f0}
+a{color:#a78bfa}
+.box{background:#1a1a2e;border:1px solid rgba(124,58,237,0.2);border-radius:12px;padding:20px 24px;margin:20px 0}
+footer{text-align:center;padding:32px 5%;border-top:1px solid rgba(255,255,255,0.07);font-size:13px;color:#475569}
+footer a{color:#64748b;text-decoration:none;margin:0 8px}
+footer a:hover{color:#a78bfa}
+</style>
+</head><body>
+<div class="header">
+  <div class="logo">Bot<span>Gen</span></div>
+  <a href="/planos" class="back">← Voltar</a>
+</div>
+<div class="container">
+  <h1>Termos de Uso</h1>
+  <div class="updated">Última atualização: abril de 2026</div>
+
+  <p>Ao contratar ou utilizar os serviços da BotGen, você concorda com os termos abaixo. Leia atentamente antes de prosseguir.</p>
+
+  <h2>1. O serviço</h2>
+  <p>A BotGen oferece uma plataforma SaaS de automação de agendamentos pelo WhatsApp com inteligência artificial. O serviço é prestado mediante assinatura mensal nos planos Básico, Pro e Agência.</p>
+
+  <h2>2. Cadastro e conta</h2>
+  <ul>
+    <li>Você deve fornecer informações verdadeiras no cadastro</li>
+    <li>É responsável por manter a confidencialidade da sua senha</li>
+    <li>Deve ter ao menos 18 anos ou representar legalmente uma empresa</li>
+    <li>Uma conta por pessoa/empresa, salvo no Plano Agência (até 3 negócios)</li>
+  </ul>
+
+  <h2>3. Uso aceitável</h2>
+  <p>É <strong>proibido</strong> usar a BotGen para:</p>
+  <ul>
+    <li>Enviar spam ou mensagens não solicitadas em massa</li>
+    <li>Atividades ilegais ou que violem direitos de terceiros</li>
+    <li>Vender, revender ou sublicenciar o serviço sem autorização</li>
+    <li>Tentar acessar dados de outros clientes</li>
+    <li>Sobrecarregar intencionalmente a infraestrutura</li>
+  </ul>
+
+  <h2>4. Pagamento e cancelamento</h2>
+  <ul>
+    <li>Cobrança mensal antecipada via Kiwify</li>
+    <li>Cancelamento a qualquer momento — sem multa</li>
+    <li>O serviço permanece ativo até o fim do período pago</li>
+    <li>Não há reembolso proporcional por cancelamento no meio do período</li>
+    <li>Em caso de inadimplência, o bot é pausado automaticamente</li>
+  </ul>
+
+  <h2>5. Planos e limites</h2>
+  <div class="box">
+    <ul>
+      <li><strong>Básico:</strong> até 7 serviços, sem lembretes automáticos, sem CSV</li>
+      <li><strong>Pro:</strong> serviços ilimitados, lembretes, CSV, relatório semanal</li>
+      <li><strong>Agência:</strong> tudo do Pro + até 3 negócios no mesmo plano</li>
+    </ul>
+  </div>
+
+  <h2>6. Disponibilidade</h2>
+  <p>Buscamos 99% de disponibilidade, mas não garantimos funcionamento ininterrupto. Manutenções programadas serão comunicadas com antecedência. Não nos responsabilizamos por indisponibilidades da Evolution API, WhatsApp ou OpenAI.</p>
+
+  <h2>7. Responsabilidade</h2>
+  <ul>
+    <li>Você é responsável pelo conteúdo enviado pelo bot</li>
+    <li>A BotGen não se responsabiliza por agendamentos perdidos por falha do WhatsApp</li>
+    <li>Nossa responsabilidade máxima é limitada ao valor pago no último mês</li>
+    <li>Não nos responsabilizamos por danos indiretos ou lucros cessantes</li>
+  </ul>
+
+  <h2>8. Propriedade intelectual</h2>
+  <p>A plataforma BotGen, seu código e design são de propriedade exclusiva da BotGen. Você retém a propriedade dos seus dados e do conteúdo do seu negócio.</p>
+
+  <h2>9. Rescisão</h2>
+  <p>Podemos suspender ou encerrar sua conta sem aviso prévio em caso de violação destes termos. Em cancelamentos normais, seus dados ficam disponíveis por 30 dias após o encerramento.</p>
+
+  <h2>10. Alterações nos termos</h2>
+  <p>Podemos alterar estes termos com aviso de 15 dias por email. O uso continuado do serviço após esse prazo implica aceitação das mudanças.</p>
+
+  <h2>11. Lei aplicável</h2>
+  <p>Estes termos são regidos pelas leis brasileiras. Foro eleito: comarca de São Gonçalo do Pará, MG, com renúncia a qualquer outro.</p>
+
+  <h2>12. Contato</h2>
+  <p><a href="mailto:mtdnvendas@gmail.com">mtdnvendas@gmail.com</a></p>
+</div>
+<footer>
+  © 2026 BotGen ·
+  <a href="/planos">Página inicial</a> ·
+  <a href="/privacidade">Política de Privacidade</a> ·
+  <a href="mailto:mtdnvendas@gmail.com">Contato</a>
+</footer>
+</body></html>"""
+
+@app.get("/termos", response_class=HTMLResponse)
+async def termos():
+    return HTMLResponse(content=_TERMOS_HTML)
 
 # ── Rotas de teste (admin only) ───────────────────────────────────────────────
 

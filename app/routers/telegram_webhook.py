@@ -8,7 +8,6 @@ LGPD:
 """
 
 from fastapi import APIRouter, Request
-from sqlalchemy.orm import Session
 from ..database import SessionLocal
 from ..models import Tenant, Customer, Conversation, Service, Pet, Appointment
 from ..services.ai_service import chat_with_ai
@@ -21,6 +20,19 @@ from ..services.notifier import notify_owner_new_appointment
 import os, json, httpx
 from datetime import datetime, timedelta
 import pytz
+
+
+def _safe_commit(db) -> bool:
+    """Commit seguro com rollback automático em caso de erro."""
+    try:
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"[DB] ❌ Erro no commit: {e}")
+        return False
+
+
 
 router   = APIRouter()
 BRASILIA = pytz.timezone("America/Sao_Paulo")
@@ -139,7 +151,7 @@ def _find_tenant_for_telegram(db) -> Tenant:
 async def send_telegram_message(chat_id: int, text: str):
     if not TELEGRAM_TOKEN:
         return
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         try:
             await client.post(
                 f"{TELEGRAM_API}/sendMessage",

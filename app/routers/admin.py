@@ -14,8 +14,20 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Appointment, Customer, Service, Tenant, Conversation, BlockedSlot
-from datetime import datetime
 import pytz, os, bcrypt, secrets
+
+
+def _safe_commit(db) -> bool:
+    """Commit seguro com rollback automático."""
+    try:
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"[Admin] ❌ Erro no commit: {e}")
+        return False
+
+
 
 router = APIRouter()
 BRASILIA     = pytz.timezone("America/Sao_Paulo")

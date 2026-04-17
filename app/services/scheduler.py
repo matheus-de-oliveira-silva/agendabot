@@ -1,5 +1,5 @@
 """
-scheduler.py — Tarefas agendadas do AgendaBot.
+scheduler.py — Tarefas agendadas do BotGen.
 
 Jobs diários (18h):
   - Lembretes de agendamento (planos Pro/Agência)
@@ -21,6 +21,19 @@ from sqlalchemy.orm import Session
 from ..database import SessionLocal
 from ..models import Appointment, Pet, Tenant, Service, BlockedSlot, Customer
 import pytz
+
+
+def _safe_commit(db) -> bool:
+    """Commit seguro com rollback automático em caso de erro."""
+    try:
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"[DB] ❌ Erro no commit: {e}")
+        return False
+
+
 
 BRASILIA = pytz.timezone("America/Sao_Paulo")
 

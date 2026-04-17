@@ -16,7 +16,6 @@ LGPD:
 """
 
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
 from ..database import SessionLocal
 from ..models import Appointment, Customer, Tenant, Service
 from .evolution_helper import send_whatsapp_message

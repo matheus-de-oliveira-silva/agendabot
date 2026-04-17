@@ -81,6 +81,88 @@ async def send_whatsapp_message(phone: str, text: str, tenant) -> bool:
             return False
 
 
+
+async def create_instance(instance_name: str) -> dict:
+    """
+    Cria nova instância na Evolution API global.
+    Se já existe, retorna success=True sem criar duplicata (idempotente).
+    """
+    if not EVOLUTION_API_URL_GLOBAL or not EVOLUTION_API_KEY_GLOBAL:
+        return {"success": False, "error": "Evolution API não configurada"}
+
+    url     = f"{EVOLUTION_API_URL_GLOBAL.rstrip('/')}/instance/create"
+    headers = {"apikey": EVOLUTION_API_KEY_GLOBAL, "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.post(
+                url,
+                json={"instanceName": instance_name, "qrcode": True, "integration": "WHATSAPP-BAILEYS"},
+                headers=headers,
+            )
+            if resp.status_code in (200, 201):
+                print(f"[Evolution] ✅ Instância criada: {instance_name}")
+                return {"success": True, "instance": instance_name}
+            elif resp.status_code == 409:
+                print(f"[Evolution] Instância já existe: {instance_name}")
+                return {"success": True, "instance": instance_name, "already_exists": True}
+            else:
+                print(f"[Evolution] ❌ Erro ao criar {resp.status_code}: {resp.text[:80]}")
+                return {"success": False, "error": f"Erro {resp.status_code}"}
+        except Exception as e:
+            print(f"[Evolution] ❌ Exceção criar instância: {e}")
+            return {"success": False, "error": str(e)}
+
+
+async def get_qrcode(instance_name: str) -> dict:
+    """
+    Busca QR Code da instância para exibir no setup.
+    Retorna {"success": True, "qrcode": "base64..."} ou {"success": False, "error": msg}
+    """
+    if not EVOLUTION_API_URL_GLOBAL or not EVOLUTION_API_KEY_GLOBAL:
+        return {"success": False, "error": "Evolution API não configurada"}
+
+    url     = f"{EVOLUTION_API_URL_GLOBAL.rstrip('/')}/instance/connect/{instance_name}"
+    headers = {"apikey": EVOLUTION_API_KEY_GLOBAL}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data   = resp.json()
+                qrcode = (data.get("base64") or
+                          data.get("qrcode", {}).get("base64") or
+                          data.get("code") or "")
+                if qrcode:
+                    return {"success": True, "qrcode": qrcode}
+                return {"success": False, "error": "QR Code não disponível ainda"}
+            return {"success": False, "error": f"Erro {resp.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+
+async def check_connection_state(instance_name: str) -> str:
+    """
+    Verifica estado da conexão de uma instância.
+    Retorna: "connected" | "disconnected" | "not_found" | "error"
+    """
+    if not EVOLUTION_API_URL_GLOBAL or not EVOLUTION_API_KEY_GLOBAL:
+        return "error"
+
+    url     = f"{EVOLUTION_API_URL_GLOBAL.rstrip('/')}/instance/connectionState/{instance_name}"
+    headers = {"apikey": EVOLUTION_API_KEY_GLOBAL}
+
+    async with httpx.AsyncClient(timeout=8) as client:
+        try:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 404:
+                return "not_found"
+            data  = resp.json()
+            state = data.get("instance", {}).get("state", "") or data.get("state", "")
+            return "connected" if state in ("open", "connected") else "disconnected"
+        except Exception:
+            return "error"
+
 async def send_whatsapp_via_instance(phone: str, text: str, instance: str) -> bool:
     """
     Envia mensagem usando a instância global (ex: instância do Matheus para boas-vindas).

@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Appointment, Customer, Service, Tenant, BlockedSlot
 from datetime import datetime, timedelta
-from typing import Optional
 import pytz, json, bcrypt, secrets, io, csv
 
 router   = APIRouter()

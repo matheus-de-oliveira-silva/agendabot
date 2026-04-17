@@ -32,6 +32,19 @@ import os, json
 from datetime import datetime, timedelta
 import pytz
 
+
+def _safe_commit(db) -> bool:
+    """Commit seguro com rollback automático em caso de erro."""
+    try:
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"[DB] ❌ Erro no commit: {e}")
+        return False
+
+
+
 router   = APIRouter()
 BRASILIA = pytz.timezone("America/Sao_Paulo")
 

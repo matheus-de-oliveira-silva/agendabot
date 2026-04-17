@@ -194,38 +194,46 @@ async def _send_email(to: str, subject: str, html: str) -> bool:
 
 # ── 1. Email de boas-vindas ───────────────────────────────────────────────────
 
-async def email_boas_vindas(to: str, nome: str, plano: str, dashboard_url: str = "") -> bool:
+async def email_boas_vindas(to: str, nome: str, plano: str, dashboard_url: str = "", setup_url: str = "") -> bool:
     """Enviado imediatamente após compra confirmada pela Kiwify."""
     plan_label   = PLAN_NAMES.get(plano, "BotGen")
     nome_display = nome.split()[0] if nome else "olá"
 
+    # Botão principal — setup se disponível, senão dashboard
+    acao_btn = ""
+    if setup_url:
+        acao_btn = _divider() + _btn("🚀 Configurar meu bot agora →", setup_url, "#7c3aed")
+        acao_txt = '<p style="font-size:13px;color:#64748b;text-align:center;margin:8px 0 0;">Clique para configurar seu negócio em poucos minutos</p>'
+    elif dashboard_url:
+        acao_btn = _divider() + _btn("Acessar meu painel →", dashboard_url, "#059669")
+        acao_txt = ""
+    else:
+        acao_txt = ""
+
     # Upsell para próximo plano
     upsell_html = ""
     if plano == "basico":
-        upsell_html = _divider() + f"""<p style="font-size:13px;color:#64748b;text-align:center;margin:0 0 10px;">Quer mais recursos? Faça upgrade a qualquer momento</p>""" + _btn("Ver Plano Pro — R$197,90/mês", CHECKOUT_LINKS["pro"], "#ffffff", "#6d28d9") .replace("background:#ffffff", "background:transparent").replace("color:#6d28d9", "color:#6d28d9;border:2px solid #7c3aed")
+        upsell_html = _divider() + f"""<p style="font-size:13px;color:#64748b;text-align:center;margin:0 0 10px;">Quer mais recursos? Faça upgrade a qualquer momento</p>""" + _btn("Ver Plano Pro — R$197,90/mês", CHECKOUT_LINKS["pro"], "#ffffff", "#6d28d9").replace("background:#ffffff", "background:transparent").replace("color:#6d28d9", "color:#6d28d9;border:2px solid #7c3aed")
     elif plano == "pro":
         upsell_html = _divider() + f"""<p style="font-size:13px;color:#64748b;text-align:center;margin:0 0 10px;">Tem mais de um negócio?</p>""" + _btn("Ver Plano Agência — R$497,90/mês", CHECKOUT_LINKS["agencia"], "transparent", "#6d28d9")
 
-    dash_btn = ""
-    if dashboard_url:
-        dash_btn = _divider() + '<p style="font-size:15px;color:#475569;margin:0 0 16px;">Assim que ativado, acesse seu painel aqui:</p>' + _btn("Acessar meu painel →", dashboard_url, "#059669")
-
     content = f"""
     <h1 style="font-size:22px;font-weight:700;color:#1e293b;margin:0 0 12px;">Bem-vindo ao BotGen, {nome_display}! 🎉</h1>
-    <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 14px;">Sua assinatura do <strong>{plan_label}</strong> foi confirmada com sucesso. Você acabou de dar um grande passo para automatizar os agendamentos do seu negócio.</p>
-    {_highlight("📞 Nossa equipe vai entrar em contato <strong>em até 2 horas</strong> pelo WhatsApp para ativar o seu bot. O processo leva apenas 15 minutos!")}
-    <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 16px;">Enquanto isso, aqui está o que vai acontecer:</p>
-    {_step("1", "Contato pelo WhatsApp", "Nossa equipe vai te ligar para agendar a ativação")}
-    {_step("2", "Chamada de 15 minutos", "Conectamos o seu WhatsApp Business e configuramos o bot ao vivo")}
+    <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 14px;">Sua assinatura do <strong>{plan_label}</strong> foi confirmada. Agora é hora de configurar seu bot!</p>
+    {acao_btn}
+    {acao_txt}
+    {_divider()}
+    <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 16px;">O que vai acontecer:</p>
+    {_step("1", "Configure seu negócio", "Clique no botão acima e preencha os dados em menos de 5 minutos")}
+    {_step("2", "Chamada de ativação", "Nossa equipe conecta seu WhatsApp Business ao vivo — 15 minutos")}
     {_step("3", "Bot ativo!", "Seus clientes já podem agendar pelo WhatsApp automaticamente", "#059669")}
-    {dash_btn}
-    <p style="font-size:14px;color:#64748b;margin:16px 0 0;">Qualquer dúvida é só responder este email ou nos chamar pelo WhatsApp. Estamos aqui! 😊</p>
+    <p style="font-size:14px;color:#64748b;margin:16px 0 0;">Qualquer dúvida é só responder este email. Estamos aqui! 😊</p>
     {upsell_html}
     """
 
     return await _send_email(
         to=to,
-        subject="🎉 Bem-vindo ao BotGen! Ativação em até 2h",
+        subject="🎉 Bem-vindo ao BotGen! Configure seu bot agora →",
         html=_base_html(content),
     )
 

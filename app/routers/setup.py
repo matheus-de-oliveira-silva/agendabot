@@ -16,12 +16,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Tenant, Service
-import os, bcrypt, secrets, httpx
+import os, bcrypt, secrets, httpx, re as _re
 
 router = APIRouter()
 
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "")
+APP_URL           = os.getenv("APP_URL", "")
 APP_URL           = os.getenv("APP_URL", "")
 
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
@@ -60,7 +61,7 @@ SETUP_STYLE = """
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'DM Sans',sans-serif;background:#0f1117;color:#e8eaf2;min-height:100vh}
+body{font-family:'DM Sans',sans-serif;background:#0f1117;color:#e8eaf2;min-height:100vh;overflow-x:hidden}
 .header{background:#13151f;padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2d3148}
 .logo{font-size:18px;font-weight:800;color:#7c7de8}
 .container{max-width:680px;margin:0 auto;padding:36px 20px 60px}
@@ -122,7 +123,7 @@ input:focus,select:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
 .biz-card.selected{border-color:#5B5BD6;background:#23254a;box-shadow:0 0 0 3px #23254a}
 .biz-icon{font-size:28px;margin-bottom:8px}
 .biz-label{font-size:13px;font-weight:700;color:#e8eaf2}
-@media(max-width:600px){.grid2{grid-template-columns:1fr}.steps{gap:0}.step-label{display:none}.biz-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.grid2{grid-template-columns:1fr}.steps{gap:0}.step-label{display:none}.biz-grid{grid-template-columns:1fr 1fr}.card{padding:16px}.container{padding:16px 12px 40px}}
 </style>
 """
 
@@ -209,7 +210,7 @@ def setup_step0(request: Request, token: str = "", db: Session = Depends(get_db)
         </div>"""
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
 <title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
@@ -290,7 +291,7 @@ def setup_step1(request: Request, token: str = "", db: Session = Depends(get_db)
     biz_label = BUSINESS_TYPES.get(tenant.business_type or "outro", {}).get("label", "Negócio")
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
 <title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
@@ -366,7 +367,7 @@ def setup_step2(request: Request, token: str = "", db: Session = Depends(get_db)
         suggest_html = '<div class="alert alert-info" style="margin-bottom:12px">💡 Pet shops geralmente fazem busca e entrega. Ative abaixo se for o seu caso!</div>'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
 <title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
@@ -480,7 +481,7 @@ def setup_step3(request: Request, token: str = "", db: Session = Depends(get_db)
     add_display   = 'none' if limit_reached else 'block'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
 <title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
@@ -564,139 +565,184 @@ def setup_step3_delete(service_id: str, request: Request, token: str = "", db: S
 # ── PASSO 4 — WhatsApp (OPCIONAL) ────────────────────────────────────────────
 
 @router.get("/setup/step4", response_class=HTMLResponse)
-def setup_step4(request: Request, token: str = "", db: Session = Depends(get_db)):
+async def setup_step4(request: Request, token: str = "", db: Session = Depends(get_db)):
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
         return _error_page("Link inválido.")
 
-    current_instance = tenant.phone_number_id or ""
-    has_instance     = bool(current_instance)
+    # Gera nome da instância baseado no tenant — único e sem espaços
+    # Formato: botgen-{primeiros 8 chars do tenant.id}
+    # Só cria se ainda não tem instância configurada
+    instance_name = tenant.phone_number_id or f"botgen-{tenant.id[:8]}"
 
-    configured_html = ""
-    if has_instance:
-        configured_html = f'<div class="alert alert-success" style="margin-bottom:16px">✅ Instância configurada: <strong>{current_instance}</strong></div>'
+    # Cria a instância automaticamente SE ainda não existir
+    # Idempotente — se já existe retorna success=True sem duplicar
+    if not tenant.phone_number_id and EVOLUTION_API_URL and EVOLUTION_API_KEY:
+        from ..services.evolution_helper import create_instance
+        result = await create_instance(instance_name)
+        if result.get("success"):
+            tenant.phone_number_id = instance_name
+            db.commit()
+
+    has_instance = bool(tenant.phone_number_id)
+    instance_name = tenant.phone_number_id or instance_name
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
+<title>Setup — BotGen</title>{SETUP_STYLE}
+<style>
+.qr-wrap{{text-align:center;padding:20px;background:#0f1117;border-radius:12px;border:1px solid #2d3148;margin-bottom:16px}}
+.qr-wrap img{{max-width:220px;width:100%;border-radius:8px}}
+.qr-status{{font-size:13px;color:#9aa0b8;margin-top:10px}}
+.pulse{{animation:pulse 2s infinite}}
+@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.5}}}}
+</style>
+</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
 {_steps_html(5)}
 <div class="card">
   <div class="card-title">📱 Conectar WhatsApp</div>
-  <div class="card-sub">Se a sua instância já foi criada pelo suporte, informe o nome abaixo. Se ainda não foi, você pode pular esta etapa — o suporte vai configurar por você.</div>
+  <div class="card-sub">Escaneie o QR Code abaixo com o <strong>WhatsApp Business</strong> do seu negócio para conectar o bot.</div>
 
-  {configured_html}
-
-  <div class="alert alert-info" style="margin-bottom:20px">
-    💡 <strong>Não sabe o nome da instância?</strong> Sem problema! Clique em "Pular por enquanto" abaixo — o suporte vai configurar o WhatsApp na chamada de ativação.
-  </div>
-
-  <div class="form-group">
-    <label>Nome da instância Evolution API (opcional agora)</label>
-    <input type="text" id="instance-input" value="{current_instance}" placeholder="Ex: barbearia-joao">
-    <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Exatamente como foi criado na Evolution (sem espaços). Deixe vazio se não souber.</div>
+  <div id="main-content">
+    {"" if not has_instance or not EVOLUTION_API_URL else f'''
+    <div class="alert alert-info" style="margin-bottom:16px">
+      📱 Instância: <strong>{instance_name}</strong> — Aguardando conexão
+    </div>
+    <div class="qr-wrap" id="qr-wrap">
+      <div class="pulse" style="font-size:13px;color:#9aa0b8">⏳ Carregando QR Code...</div>
+    </div>
+    '''}
+    {"" if EVOLUTION_API_URL else '<div class="alert alert-warn">⚠️ Evolution API não configurada. O suporte vai conectar o WhatsApp na chamada de ativação. Pode pular esta etapa.</div>'}
   </div>
 
   <div id="conn-status" style="display:none" class="conn-status conn-loading">⏳ Verificando...</div>
 
-  <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
-    <button onclick="testConnection()" class="btn btn-outline btn-sm">🔍 Testar conexão</button>
+  <div class="divider"></div>
+
+  <div style="font-size:13px;font-weight:700;margin-bottom:10px">Como funciona:</div>
+  <div style="font-size:13px;color:#9aa0b8;line-height:1.8;margin-bottom:16px">
+    <div style="padding:6px 0;border-bottom:1px solid #2d3148">1. Abra o WhatsApp Business do seu negócio</div>
+    <div style="padding:6px 0;border-bottom:1px solid #2d3148">2. Vá em <strong style="color:#e8eaf2">Aparelhos conectados → Conectar aparelho</strong></div>
+    <div style="padding:6px 0;border-bottom:1px solid #2d3148">3. Escaneie o QR Code acima</div>
+    <div style="padding:6px 0">4. Aguarde a confirmação ✅</div>
   </div>
 
-  <div class="divider"></div>
-  <div style="font-size:13px;font-weight:700;margin-bottom:14px">📋 Como conectar (o suporte pode fazer por você)</div>
-  <div style="font-size:13px;color:#9aa0b8;line-height:1.8">
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">1. Acesse o painel da Evolution API</div>
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">2. Crie instância com nome sem espaços (ex: <code style="color:#a29bfe;background:#1a1d27;padding:1px 5px;border-radius:4px">meu-petshop</code>)</div>
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">3. Escaneie o QR Code com o WhatsApp Business do negócio</div>
-    <div style="padding:8px 0;border-bottom:1px solid #2d3148">4. Aguarde "Connected" na Evolution</div>
-    <div style="padding:8px 0">5. Cole o nome da instância acima e teste</div>
-  </div>
-
-  <div class="divider"></div>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
     <a href="/setup/step3?token={token}" class="btn btn-outline" style="flex:1;min-width:120px">← Voltar</a>
-    <button onclick="saveAndNext(false)" class="btn btn-warn" style="flex:1;min-width:140px">Pular por enquanto →</button>
-    <button onclick="saveAndNext(true)" class="btn btn-primary" style="flex:2;min-width:160px">Salvar e continuar →</button>
+    <button onclick="skipStep()" class="btn btn-warn" style="flex:1;min-width:140px">Pular por enquanto →</button>
+    <button onclick="checkAndContinue()" class="btn btn-primary" style="flex:2;min-width:160px" id="btn-continue">Já conectei →</button>
   </div>
 </div>
 </div>
 
 <script>
-const TOKEN = "{token}";
+const TOKEN   = "{token}";
+const INSTANCE = "{instance_name}";
+const HAS_EVO  = {"true" if EVOLUTION_API_URL else "false"};
+let pollTimer  = null;
+let connected  = false;
 
-async function testConnection() {{
-  const instance = document.getElementById('instance-input').value.trim();
-  if (!instance) {{ alert('Digite o nome da instância primeiro.'); return; }}
-  const el = document.getElementById('conn-status');
-  el.style.display = 'block';
-  el.className = 'conn-status conn-loading';
-  el.textContent = '⏳ Verificando conexão...';
+async function loadQR() {{
+  if (!HAS_EVO) return;
   try {{
-    const res = await fetch(`/setup/test-whatsapp?token=${{TOKEN}}&instance=${{encodeURIComponent(instance)}}`);
-    const data = await res.json();
-    if (data.status === 'connected') {{
-      el.className = 'conn-status conn-ok';
-      el.textContent = '✅ WhatsApp conectado com sucesso!';
-    }} else if (data.status === 'not_found') {{
-      el.className = 'conn-status conn-fail';
-      el.textContent = '❌ Instância não encontrada. Verifique o nome.';
+    const r = await fetch(`/setup/qrcode?token=${{TOKEN}}&instance=${{encodeURIComponent(INSTANCE)}}`);
+    const d = await r.json();
+    const wrap = document.getElementById('qr-wrap');
+    if (!wrap) return;
+    if (d.qrcode) {{
+      wrap.innerHTML = `<img src="${{d.qrcode.startsWith('data:') ? d.qrcode : 'data:image/png;base64,' + d.qrcode}}" alt="QR Code"><div class="qr-status">Aponte a câmera do WhatsApp Business para este código</div>`;
     }} else {{
-      el.className = 'conn-status conn-fail';
-      el.textContent = '⚠️ WhatsApp desconectado. Escaneie o QR Code na Evolution API.';
+      wrap.innerHTML = '<div style="color:#9aa0b8;font-size:13px;padding:16px">⏳ QR Code sendo gerado... Aguarde.</div>';
+      setTimeout(loadQR, 3000);
     }}
   }} catch(e) {{
-    el.className = 'conn-status conn-fail';
-    el.textContent = '❌ Erro ao conectar com a Evolution API.';
+    setTimeout(loadQR, 4000);
   }}
 }}
 
-async function saveAndNext(requireInstance) {{
-  const instance = document.getElementById('instance-input').value.trim();
-  if (requireInstance && !instance) {{
-    alert('Informe o nome da instância ou clique em "Pular por enquanto".');
+async function pollConnection() {{
+  if (!HAS_EVO || connected) return;
+  try {{
+    const r = await fetch(`/setup/test-whatsapp?token=${{TOKEN}}&instance=${{encodeURIComponent(INSTANCE)}}`);
+    const d = await r.json();
+    if (d.status === 'connected') {{
+      connected = true;
+      clearTimeout(pollTimer);
+      const el = document.getElementById('conn-status');
+      el.style.display = 'block';
+      el.className = 'conn-status conn-ok';
+      el.textContent = '✅ WhatsApp conectado! Pode continuar.';
+      document.getElementById('btn-continue').textContent = 'Continuar →';
+      document.getElementById('btn-continue').style.background = 'var(--success, #2e7d32)';
+    }} else {{
+      pollTimer = setTimeout(pollConnection, 4000);
+    }}
+  }} catch(e) {{
+    pollTimer = setTimeout(pollConnection, 5000);
+  }}
+}}
+
+async function checkAndContinue() {{
+  if (!HAS_EVO) {{
+    window.location.href = `/setup/step5?token=${{TOKEN}}`;
     return;
   }}
-  const res = await fetch(`/setup/step4/save?token=${{TOKEN}}`, {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{instance: instance || ''}})
-  }});
-  if (res.ok) {{
+  const r = await fetch(`/setup/test-whatsapp?token=${{TOKEN}}&instance=${{encodeURIComponent(INSTANCE)}}`);
+  const d = await r.json();
+  if (d.status === 'connected') {{
     window.location.href = `/setup/step5?token=${{TOKEN}}`;
   }} else {{
-    const data = await res.json().catch(() => ({{}}));
-    alert(data.error || 'Erro ao salvar. Tente novamente.');
+    const el = document.getElementById('conn-status');
+    el.style.display = 'block';
+    el.className = 'conn-status conn-fail';
+    el.textContent = '⚠️ Ainda não conectado. Escaneie o QR Code e tente novamente.';
   }}
+}}
+
+async function skipStep() {{
+  window.location.href = `/setup/step5?token=${{TOKEN}}`;
+}}
+
+// Inicia carregamento do QR e polling
+if (HAS_EVO) {{
+  loadQR();
+  pollTimer = setTimeout(pollConnection, 5000);
 }}
 </script>
 </body></html>""")
 
 
+
+@router.get("/setup/qrcode")
+async def get_qrcode_route(token: str = "", instance: str = "", db: Session = Depends(get_db)):
+    """Retorna o QR Code da instância para exibir no setup."""
+    tenant = _get_tenant_by_token(token, db)
+    if not tenant:
+        return JSONResponse({"error": "Token inválido"}, status_code=400)
+    if not instance:
+        instance = tenant.phone_number_id or ""
+    if not instance:
+        return JSONResponse({"error": "Instância não configurada"}, status_code=400)
+    from ..services.evolution_helper import get_qrcode
+    result = await get_qrcode(instance)
+    return JSONResponse(result)
+
 @router.get("/setup/test-whatsapp")
 async def test_whatsapp(token: str = "", instance: str = "", db: Session = Depends(get_db)):
+    """Verifica estado da conexão usando a função centralizada do evolution_helper."""
     tenant = _get_tenant_by_token(token, db)
     if not tenant:
         return JSONResponse({"status": "error", "message": "Token inválido"}, status_code=400)
     if not instance:
+        instance = tenant.phone_number_id or ""
+    if not instance:
         return JSONResponse({"status": "error", "message": "Instância não informada"}, status_code=400)
-    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-        return JSONResponse({"status": "error", "message": "Evolution API não configurada"}, status_code=500)
 
-    url = f"{EVOLUTION_API_URL.rstrip('/')}/instance/connectionState/{instance}"
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(url, headers={"apikey": EVOLUTION_API_KEY})
-        if resp.status_code == 404:
-            return JSONResponse({"status": "not_found"})
-        data  = resp.json()
-        state = data.get("instance", {}).get("state", "") or data.get("state", "")
-        if state in ("open", "connected"):
-            return JSONResponse({"status": "connected"})
-        return JSONResponse({"status": "disconnected", "state": state})
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    from ..services.evolution_helper import check_connection_state
+    state = await check_connection_state(instance)
+    return JSONResponse({"status": state})
 
 
 @router.post("/setup/step4/save")
@@ -781,7 +827,7 @@ def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)
         pw_aviso = '<div class="alert alert-info" style="margin-bottom:14px">💡 Você já tem uma senha cadastrada. Crie uma nova abaixo para substituir, ou deixe em branco para manter a atual.</div>'
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
 <title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
@@ -902,7 +948,7 @@ def setup_done(request: Request, tid: str = "", db: Session = Depends(get_db)):
         </div>"""
 
     return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
 <title>Setup concluído! 🎉</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container" style="max-width:520px">
