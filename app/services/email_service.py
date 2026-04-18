@@ -98,7 +98,7 @@ def _base_html(content: str) -> str:
             <td style="padding:24px 32px;background:#f8fafc;text-align:center;border-top:1px solid #e2e8f0;">
               <p style="font-size:12px;color:#94a3b8;margin:0;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
                 BotGen — Agendamento automático pelo WhatsApp com IA<br>
-                <a href="{APP_URL}" style="color:#7c3aed;">botgen.com.br</a> ·
+                BotGen — Agendamento automático pelo WhatsApp ·
                 Você recebe este email por ser cliente BotGen.<br>
                 Dúvidas? Responda este email.
               </p>
@@ -223,9 +223,9 @@ async def email_boas_vindas(to: str, nome: str, plano: str, dashboard_url: str =
     {acao_btn}
     {acao_txt}
     {_divider()}
-    <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 16px;">O que vai acontecer:</p>
-    {_step("1", "Configure seu negócio", "Clique no botão acima e preencha os dados em menos de 5 minutos")}
-    {_step("2", "Chamada de ativação", "Nossa equipe conecta seu WhatsApp Business ao vivo — 15 minutos")}
+    <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 16px;">Em 3 passos simples:</p>
+    {_step("1", "Clique no botão acima", "Preencha os dados do seu negócio em menos de 5 minutos")}
+    {_step("2", "Escaneie o QR Code", "Conecte seu WhatsApp Business — é só apontar a câmera")}
     {_step("3", "Bot ativo!", "Seus clientes já podem agendar pelo WhatsApp automaticamente", "#059669")}
     <p style="font-size:14px;color:#64748b;margin:16px 0 0;">Qualquer dúvida é só responder este email. Estamos aqui! 😊</p>
     {upsell_html}

@@ -259,7 +259,9 @@ async def _enviar_boas_vindas(
     if email:
         try:
             ok = await email_boas_vindas(
-                to=email, nome=nome, plano=plano, dashboard_url=dashboard_url
+                to=email, nome=nome, plano=plano,
+                setup_url=setup_url,
+                dashboard_url=dashboard_url,
             )
             print(f"[Billing] Email boas-vindas: {'✅' if ok else '⚠️ falhou'}")
         except Exception as e:
