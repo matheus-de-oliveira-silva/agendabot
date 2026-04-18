@@ -538,8 +538,8 @@ def setup_campos(request: Request, token: str = "", db: Session = Depends(get_db
     </div>
   </div>
   <div style="font-size:11px;font-weight:700;color:#9aa0b8;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Opcionais — ative o que quiser</div>
-  <form method="POST" action="/setup/campos?token={{token}}">
-    <input type="hidden" name="token" value="{{token}}">
+  <form method="POST" action="/setup/campos?token={token}">
+    <input type="hidden" name="token" value="{token}">
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
       <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
         <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">🐾 Nome do pet/animal</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Ex: Rex, Mel, Thor</div></div>
@@ -571,7 +571,7 @@ def setup_campos(request: Request, token: str = "", db: Session = Depends(get_db
       </label>
     </div>
     <div style="display:flex;gap:10px">
-      <a href="/setup/step2?token={{token}}" class="btn btn-outline" style="flex:1">← Voltar</a>
+      <a href="/setup/step2?token={token}" class="btn btn-outline" style="flex:1">← Voltar</a>
       <button type="submit" class="btn btn-primary" style="flex:2">Próximo →</button>
     </div>
   </form>
