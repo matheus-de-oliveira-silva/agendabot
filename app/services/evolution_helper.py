@@ -16,6 +16,8 @@ LGPD:
 import os
 import httpx
 
+APP_URL_GLOBAL = os.getenv("APP_URL", "")
+
 # Variáveis globais — usadas como fallback quando o tenant não tem Evolution própria
 EVOLUTION_API_URL_GLOBAL = os.getenv("EVOLUTION_API_URL", "")
 EVOLUTION_API_KEY_GLOBAL = os.getenv("EVOLUTION_API_KEY", "")
@@ -82,10 +84,52 @@ async def send_whatsapp_message(phone: str, text: str, tenant) -> bool:
 
 
 
+async def configure_instance_webhook(instance_name: str) -> bool:
+    """
+    Configura o webhook da instância para receber mensagens do WhatsApp.
+    Chamado automaticamente após criar a instância.
+    """
+    if not EVOLUTION_API_URL_GLOBAL or not EVOLUTION_API_KEY_GLOBAL:
+        return False
+
+    app_url = APP_URL_GLOBAL.rstrip("/") if APP_URL_GLOBAL else ""
+    if not app_url:
+        print(f"[Evolution] ⚠️ APP_URL não configurada — webhook não configurado")
+        return False
+
+    webhook_url = f"{app_url}/whatsapp/webhook"
+    url     = f"{EVOLUTION_API_URL_GLOBAL.rstrip('/')}/webhook/set/{instance_name}"
+    headers = {"apikey": EVOLUTION_API_KEY_GLOBAL, "Content-Type": "application/json"}
+
+    payload = {
+        "url":     webhook_url,
+        "webhook_by_events": False,
+        "webhook_base64":    False,
+        "events": [
+            "MESSAGES_UPSERT",
+            "CONNECTION_UPDATE",
+        ]
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code in (200, 201):
+                print(f"[Evolution] ✅ Webhook configurado: {instance_name} → {webhook_url}")
+                return True
+            else:
+                print(f"[Evolution] ⚠️ Erro ao configurar webhook {resp.status_code}: {resp.text[:80]}")
+                return False
+        except Exception as e:
+            print(f"[Evolution] ⚠️ Exceção webhook: {e}")
+            return False
+
+
 async def create_instance(instance_name: str) -> dict:
     """
-    Cria nova instância na Evolution API global.
-    Se já existe, retorna success=True sem criar duplicata (idempotente).
+    Cria nova instância na Evolution API global e configura webhook automaticamente.
+    Se já existe, garante que o webhook está configurado.
+    Idempotente — não cria duplicata.
     """
     if not EVOLUTION_API_URL_GLOBAL or not EVOLUTION_API_KEY_GLOBAL:
         return {"success": False, "error": "Evolution API não configurada"}
@@ -100,12 +144,15 @@ async def create_instance(instance_name: str) -> dict:
                 json={"instanceName": instance_name, "qrcode": True, "integration": "WHATSAPP-BAILEYS"},
                 headers=headers,
             )
-            if resp.status_code in (200, 201):
-                print(f"[Evolution] ✅ Instância criada: {instance_name}")
-                return {"success": True, "instance": instance_name}
-            elif resp.status_code == 409:
-                print(f"[Evolution] Instância já existe: {instance_name}")
-                return {"success": True, "instance": instance_name, "already_exists": True}
+            already_exists = resp.status_code == 409
+            if resp.status_code in (200, 201) or already_exists:
+                if already_exists:
+                    print(f"[Evolution] Instância já existe: {instance_name}")
+                else:
+                    print(f"[Evolution] ✅ Instância criada: {instance_name}")
+                # Configura webhook automaticamente (nova ou existente)
+                await configure_instance_webhook(instance_name)
+                return {"success": True, "instance": instance_name, "already_exists": already_exists}
             else:
                 print(f"[Evolution] ❌ Erro ao criar {resp.status_code}: {resp.text[:80]}")
                 return {"success": False, "error": f"Erro {resp.status_code}"}
