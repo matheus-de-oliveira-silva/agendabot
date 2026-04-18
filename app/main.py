@@ -270,7 +270,7 @@ _LANDING_HTML = """
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BotGen — Seu WhatsApp agendando sozinho com IA</title>
-  <meta name="description" content="Automatize os agendamentos do seu negócio pelo WhatsApp com inteligência artificial. Sem app, sem complicação. Ativo em 15 minutos.">
+  <meta name="description" content="Automatize os agendamentos do seu negócio pelo WhatsApp com inteligência artificial. Sem app, sem complicação. Configure em minutos, direto pelo celular.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,700;0,800;0,900;1,800&display=swap" rel="stylesheet">
   <style>
@@ -542,7 +542,7 @@ _LANDING_HTML = """
       <a href="#como-funciona" class="btn-big btn-big-ghost">Ver como funciona</a>
     </div>
     <div class="hero-social">
-      Usado por <strong>barbearias, pet shops, salões</strong> e mais de <strong>50 outros negócios</strong>
+      Funciona para <strong>barbearias, pet shops, salões</strong> e qualquer negócio de agendamento
     </div>
   </div>
 </section>
@@ -558,8 +558,8 @@ _LANDING_HTML = """
     <div class="stat-label">Agendamentos realizados</div>
   </div>
   <div class="stat-item">
-    <div class="stat-num"><span>15</span>min</div>
-    <div class="stat-label">Para ativar o bot</div>
+    <div class="stat-num"><span>10</span>min</div>
+    <div class="stat-label">Para configurar o bot</div>
   </div>
   <div class="stat-item">
     <div class="stat-num"><span>24</span>h</div>
@@ -641,7 +641,7 @@ _LANDING_HTML = """
   <div class="container">
     <div style="text-align:center;margin-bottom:48px">
       <div class="section-eyebrow">Processo</div>
-      <h2>Do pagamento ao bot ativo<br>em menos de 15 minutos</h2>
+      <h2>Do pagamento ao bot ativo<br>em poucos minutos</h2>
     </div>
     <div class="steps-grid">
       <div class="step-card">
@@ -651,8 +651,8 @@ _LANDING_HTML = """
       </div>
       <div class="step-card">
         <div class="step-num">2</div>
-        <h3>Chamada de 15 min</h3>
-        <p>Nossa equipe liga, conecta seu WhatsApp Business e configura o bot ao vivo com você.</p>
+        <h3>Configure em minutos</h3>
+        <p>Preencha o formulário com os dados do negócio, cadastre seus serviços e escaneie o QR Code com seu WhatsApp Business.</p>
       </div>
       <div class="step-card">
         <div class="step-num">3</div>
@@ -716,7 +716,7 @@ _LANDING_HTML = """
     <div style="text-align:center;margin-bottom:52px">
       <div class="section-eyebrow">Preços</div>
       <h2>Planos simples e transparentes</h2>
-      <p style="color:var(--muted2);font-size:17px;margin-top:10px">Todos incluem ativação gratuita e suporte pelo WhatsApp.</p>
+      <p style="color:var(--muted2);font-size:17px;margin-top:10px">Todos incluem configuração própria, suporte pelo WhatsApp e 7 dias de garantia.</p>
     </div>
 
     <div class="plans-grid">
@@ -731,7 +731,7 @@ _LANDING_HTML = """
           <li><span class="ok">✓</span> Até 7 serviços cadastrados</li>
           <li><span class="ok">✓</span> Painel de agendamentos</li>
           <li><span class="ok">✓</span> Notificação de cada agendamento</li>
-          <li><span class="ok">✓</span> Ativação em até 2 horas</li>
+          <li><span class="ok">✓</span> Ativação imediata — configure você mesmo</li>
           <li class="off"><span class="no">✗</span> Lembretes automáticos</li>
           <li class="off"><span class="no">✗</span> Exportação CSV</li>
           <li class="off"><span class="no">✗</span> Relatório semanal por email</li>
@@ -790,7 +790,7 @@ _LANDING_HTML = """
 
       <div class="faq-item">
         <button class="faq-q">Preciso ter WhatsApp Business? <span class="ico">+</span></button>
-        <div class="faq-a">Sim, você precisa do WhatsApp Business instalado no celular do seu negócio. É gratuito e funciona no mesmo número que você já usa. Na chamada de ativação a gente te ajuda a configurar tudo.</div>
+        <div class="faq-a">Sim, você precisa do WhatsApp Business instalado no celular do seu negócio. É gratuito, disponível na Play Store e App Store, e funciona no mesmo número que você já usa.</div>
       </div>
 
       <div class="faq-item">
@@ -820,12 +820,12 @@ _LANDING_HTML = """
 
       <div class="faq-item">
         <button class="faq-q">Quanto tempo demora para ativar? <span class="ico">+</span></button>
-        <div class="faq-a">Nossa equipe entra em contato em até 2 horas após a compra. A ativação em si leva apenas 15 minutos numa chamada rápida.</div>
+        <div class="faq-a">Em média 10 minutos. Após a compra você recebe o link de configuração por email imediatamente. É só preencher os dados do negócio, cadastrar seus serviços e escanear o QR Code com o WhatsApp Business — tudo pelo celular, sem precisar de ninguém.</div>
       </div>
 
       <div class="faq-item">
         <button class="faq-q">Como é feito o processo de entrega? <span class="ico">+</span></button>
-        <div class="faq-a">Imediatamente após a compra você recebe um WhatsApp e um email de boas-vindas. Nossa equipe entra em contato em até 2 horas para agendar a chamada de ativação. Não há nada para baixar — tudo é configurado ao vivo pela nossa equipe diretamente no seu WhatsApp Business.</div>
+        <div class="faq-a">100% automático e imediato. Assim que a compra é confirmada pela Kiwify, você recebe um email com o link de configuração. Clica no link, preenche os dados do negócio, escaneia o QR Code com seu WhatsApp Business e o bot já está no ar. Não precisa falar com ninguém.</div>
       </div>
 
     </div>
@@ -837,7 +837,7 @@ _LANDING_HTML = """
   <div class="container">
     <div class="section-eyebrow">Comece hoje</div>
     <h2>Pare de responder<br>agendamentos à mão</h2>
-    <p>Ative o BotGen em 15 minutos e tenha uma atendente que nunca dorme, nunca erra e nunca reclama.</p>
+    <p>Configure o BotGen em minutos e tenha uma atendente que nunca dorme, nunca erra e nunca reclama.</p>
     <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
       <a href="https://pay.kiwify.com.br/ypIXFRM" class="btn-big btn-big-ghost" target="_blank">Básico — R$97,90</a>
       <a href="https://pay.kiwify.com.br/pndpF39" class="btn-big btn-big-primary" target="_blank">Pro — R$197,90 ⭐</a>
