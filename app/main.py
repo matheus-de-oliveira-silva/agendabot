@@ -171,6 +171,25 @@ def _auto_migrate_v7():
 _auto_migrate_v7()
 
 
+def _auto_migrate_v8():
+    """Adiciona campos de pagamento no Tenant (pix_key, pix_type, payment_methods, payment_note)."""
+    try:
+        inspector = sa_inspect(engine)
+        cols = [c["name"] for c in inspector.get_columns("tenants")]
+        with engine.connect() as conn:
+            if "pix_key"         not in cols: conn.execute(text("ALTER TABLE tenants ADD COLUMN pix_key VARCHAR"))
+            if "collect_fields"  not in cols: conn.execute(text("ALTER TABLE tenants ADD COLUMN collect_fields TEXT"))
+            if "pix_type"        not in cols: conn.execute(text("ALTER TABLE tenants ADD COLUMN pix_type VARCHAR DEFAULT 'telefone'"))
+            if "payment_methods" not in cols: conn.execute(text("ALTER TABLE tenants ADD COLUMN payment_methods VARCHAR"))
+            if "payment_note"    not in cols: conn.execute(text("ALTER TABLE tenants ADD COLUMN payment_note VARCHAR"))
+            conn.commit()
+        print("[migrate-v8] concluida.")
+    except Exception as e:
+        print(f"[migrate-v8] erro: {e}")
+
+_auto_migrate_v8()
+
+
 # ── Scheduler loops ───────────────────────────────────────────────────────────
 
 def _segundos_ate(hora: int, minuto: int = 0) -> float:

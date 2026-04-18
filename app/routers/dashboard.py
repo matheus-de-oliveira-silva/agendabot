@@ -26,8 +26,32 @@ PAYMENT_LABELS = {
     "waived":  ("🎁 Isento", "#f3e5f5", "#6a1b9a"),
 }
 
-BUSINESS_NO_SUBJECT = {"barbearia", "salao", "estetica", "outro"}
+BUSINESS_NO_SUBJECT = {"barbearia", "salao", "estetica", "outro", "clinica_humana", "delivery"}
 DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
+COLLECT_DEFAULTS = {
+    "petshop":        {"pet_name": True,  "pet_breed": True,  "pet_weight": True,  "pickup_time": True,  "address": True,  "notes": False, "phone": False},
+    "clinica":        {"pet_name": True,  "pet_breed": True,  "pet_weight": True,  "pickup_time": False, "address": False, "notes": False, "phone": False},
+    "clinica_humana": {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "adocao":         {"pet_name": True,  "pet_breed": True,  "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "barbearia":      {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": False, "phone": False},
+    "salao":          {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "estetica":       {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "delivery":       {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": True,  "notes": True,  "phone": False},
+    "outro":          {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": False, "phone": False},
+}
+
+def _get_collect_fields(tenant) -> dict:
+    import json as _j
+    biz_type = getattr(tenant, 'business_type', 'outro') or 'outro'
+    defaults = COLLECT_DEFAULTS.get(biz_type, COLLECT_DEFAULTS["outro"]).copy()
+    raw = getattr(tenant, 'collect_fields', None)
+    if raw:
+        try:
+            defaults.update(_j.loads(raw))
+        except Exception:
+            pass
+    return defaults
 
 CHECKOUT_LINKS = {
     "basico":  "https://pay.kiwify.com.br/ypIXFRM",
@@ -331,8 +355,21 @@ async def save_tenant_config(request: Request, db: Session = Depends(get_db)):
     if "open_time"    in data: tenant.open_time    = data["open_time"]  or "09:00"
     if "close_time"   in data: tenant.close_time   = data["close_time"] or "18:00"
     if "open_days"    in data: tenant.open_days    = data["open_days"]  or "0,1,2,3,4,5"
-    if "bot_active"      in data: tenant.bot_active      = bool(data["bot_active"])
-    if "notify_new_appt" in data: tenant.notify_new_appt = bool(data["notify_new_appt"])
+    if "bot_active"       in data: tenant.bot_active       = bool(data["bot_active"])
+    if "notify_new_appt"  in data: tenant.notify_new_appt  = bool(data["notify_new_appt"])
+    if "pix_key"          in data: tenant.pix_key          = (data["pix_key"] or "").strip() or None
+    if "pix_type"         in data: tenant.pix_type         = data["pix_type"] or "telefone"
+    if "payment_methods"  in data: tenant.payment_methods  = (data["payment_methods"] or "").strip() or None
+    if "payment_note"     in data: tenant.payment_note     = (data["payment_note"] or "").strip() or None
+    if "collect_fields"  in data:
+        import json as _j
+        try:
+            cf = data["collect_fields"]
+            if isinstance(cf, dict):
+                tenant.collect_fields = _j.dumps(cf)
+                tenant.needs_address  = bool(cf.get("address", False))
+        except Exception:
+            pass
     db.commit()
     return {"success": True}
 
@@ -379,39 +416,60 @@ def export_relatorio(request: Request, mes: str = "", db: Session = Depends(get_
     cmap = _load_customers_map(db, tenant.id, [a.customer_id for a in appts])
     smap = _load_services_map(db, tenant.id, [a.service_id  for a in appts])
 
+    # CSV em StringIO → encode utf-8-sig (BOM) no final
+    # Garante que Excel BR abre com acentos corretos e separador ";"
     output = io.StringIO()
-    writer = csv.writer(output)
-    header = (["Data/Hora","Cliente","Pet","Raça","Peso(kg)","Serviço","Valor(R$)","Status","Pagamento","Método","PIX","Busca"]
+    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+
+    header = (["Data/Hora", "Cliente", "Pet", "Raça", "Peso(kg)", "Serviço",
+                "Valor(R$)", "Status", "Pagamento", "Método", "PIX", "Busca"]
               if show_pet else
-              ["Data/Hora","Cliente","Serviço","Valor(R$)","Status","Pagamento","Método","PIX","Busca"])
+              ["Data/Hora", "Cliente", "Serviço", "Valor(R$)", "Status",
+               "Pagamento", "Método", "PIX", "Busca"])
     if needs_address: header.append(address_label)
     writer.writerow(header)
 
     for a in appts:
         customer     = cmap.get(a.customer_id)
         service      = smap.get(a.service_id)
-        nome_cliente = (customer.name or customer.phone) if customer else "-"
+        # Cliente: mostra nome ou telefone formatado se não tem nome
+        if customer:
+            if customer.name and customer.name.strip() and customer.name != customer.phone:
+                nome_cliente = customer.name.strip()
+            else:
+                phone = customer.phone or ""
+                nome_cliente = phone if phone else "Sem nome"
+        else:
+            nome_cliente = "Sem nome"
+
         nome_servico = service.name if service else "-"
         price_raw    = a.payment_amount or (service.price if service else 0) or 0
-        valor        = f"{price_raw/100:.2f}"
+        valor        = f"R$ {price_raw/100:.2f}".replace(".", ",")
         status_label = STATUS_LABELS.get(a.status, (a.status, "", ""))[0]
-        pay_label    = PAYMENT_LABELS.get(a.payment_status or "pending", (a.payment_status or "-", "", ""))[0]
-        pay_label    = pay_label.replace("💳","").replace("✅","").replace("🎁","").strip()
+        pay_raw      = PAYMENT_LABELS.get(a.payment_status or "pending", (a.payment_status or "", "", ""))[0]
+        pay_label    = pay_raw.replace("💳","").replace("✅","").replace("🎁","").strip()
+        metodo       = a.payment_method or ""
+        pix          = a.payment_pix_key or ""
+        busca        = a.pickup_time or ""
+        peso         = str(a.pet_weight).replace(".", ",") if a.pet_weight else ""
+
         row = ([a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
-                a.pet_name or "-", a.pet_breed or "-", a.pet_weight or "-",
-                nome_servico, valor, status_label, pay_label,
-                a.payment_method or "-", a.payment_pix_key or "-", a.pickup_time or "-"]
+                a.pet_name or "", a.pet_breed or "", peso,
+                nome_servico, valor, status_label, pay_label, metodo, pix, busca]
                if show_pet else
                [a.scheduled_at.strftime("%d/%m/%Y %H:%M"), nome_cliente,
-                nome_servico, valor, status_label, pay_label,
-                a.payment_method or "-", a.payment_pix_key or "-", a.pickup_time or "-"])
-        if needs_address: row.append(a.pickup_address or "-")
+                nome_servico, valor, status_label, pay_label, metodo, pix, busca])
+        if needs_address: row.append(a.pickup_address or "")
         writer.writerow(row)
 
-    output.seek(0)
-    filename = f"relatorio_{tenant.name}_{mes_dt.strftime('%Y-%m')}.csv"
-    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv; charset=utf-8",
-                             headers={"Content-Disposition": f"attachment; filename={filename}"})
+    # Encode com BOM utf-8-sig — acentos corretos no Excel sem configuração
+    csv_bytes = ("\ufeff" + output.getvalue()).encode("utf-8")
+    filename  = f"relatorio_{tenant.name}_{mes_dt.strftime('%Y-%m')}.csv"
+    return StreamingResponse(
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{filename}"}
+    )
 
 
 # ── Dashboard principal ───────────────────────────────────────────────────────
@@ -473,6 +531,7 @@ a.plan-btn{{display:block;padding:14px 20px;border-radius:12px;text-decoration:n
     show_pet       = biz_type not in BUSINESS_NO_SUBJECT
 
     plano           = getattr(tenant, 'plan', 'basico') or 'basico'
+    _cf             = _get_collect_fields(tenant)
     plan_active     = getattr(tenant, 'plan_active', True)
     pode_csv        = _check_plan_feature(tenant, "csv")
     pode_lembretes  = _check_plan_feature(tenant, "lembretes")
@@ -1203,6 +1262,56 @@ input:focus,select:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--
         </div>
 
         <div class="config-section">
+            <div class="config-section-title">💳 Pagamento</div>
+            <div class="form-group">
+                <label>Chave PIX (o bot vai informar ao cliente após confirmar)</label>
+                <input type="text" id="cfg_pix_key" value="{{current_pix_key}}" placeholder="Ex: 11999999999 ou email@negocio.com">
+                <div style="font-size:11px;color:var(--text3);margin-top:4px">Deixe em branco se preferir combinar pagamento pessoalmente</div>
+            </div>
+            <div class="form-group">
+                <label>Observação de pagamento (aparece após agendamento)</label>
+                <input type="text" id="cfg_payment_note" value="{{current_payment_note}}" placeholder="Ex: Pagamento na entrega ou PIX antecipado">
+            </div>
+            <button class="btn-submit" style="max-width:200px" onclick="savePayment()">💾 Salvar pagamento</button>
+        </div>
+
+        <div class="config-section">
+            <div class="config-section-title">📋 Campos que o bot coleta</div>
+            <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Configure o que a IA pergunta ao cliente durante o agendamento.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px" id="collect-fields-list">
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;cursor:pointer">
+                <div style="font-size:13px;font-weight:600">🐾 Nome do pet/animal</div>
+                <input type="checkbox" id="cf_pet_name" {"checked" if _cf.get("pet_name") else ""} onchange="saveCollectFields()">
+              </label>
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;cursor:pointer">
+                <div style="font-size:13px;font-weight:600">🦴 Raça do pet</div>
+                <input type="checkbox" id="cf_pet_breed" {"checked" if _cf.get("pet_breed") else ""} onchange="saveCollectFields()">
+              </label>
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;cursor:pointer">
+                <div style="font-size:13px;font-weight:600">⚖️ Peso do pet</div>
+                <input type="checkbox" id="cf_pet_weight" {"checked" if _cf.get("pet_weight") else ""} onchange="saveCollectFields()">
+              </label>
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;cursor:pointer">
+                <div style="font-size:13px;font-weight:600">🏠 Horário de busca/entrega</div>
+                <input type="checkbox" id="cf_pickup_time" {"checked" if _cf.get("pickup_time") else ""} onchange="saveCollectFields()">
+              </label>
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;cursor:pointer">
+                <div style="font-size:13px;font-weight:600">📍 Endereço de busca/entrega</div>
+                <input type="checkbox" id="cf_address" {"checked" if _cf.get("address") else ""} onchange="saveCollectFields()">
+              </label>
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;cursor:pointer">
+                <div style="font-size:13px;font-weight:600">📝 Observações do cliente</div>
+                <input type="checkbox" id="cf_notes" {"checked" if _cf.get("notes") else ""} onchange="saveCollectFields()">
+              </label>
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;cursor:pointer">
+                <div style="font-size:13px;font-weight:600">📱 Telefone de contato</div>
+                <input type="checkbox" id="cf_phone" {"checked" if _cf.get("phone") else ""} onchange="saveCollectFields()">
+              </label>
+            </div>
+            <div style="font-size:11px;color:var(--text3)">💡 Alterações entram em vigor imediatamente para o bot</div>
+        </div>
+
+        <div class="config-section">
             <div class="config-section-title">⏰ Horários de atendimento</div>
             <div class="config-grid2">
                 <div class="form-group"><label>Abre às</label><input type="time" id="cfg_open_time" value="{current_open}"></div>
@@ -1501,6 +1610,27 @@ function toggleConfigDay(btn) {{
     btn.classList.toggle('active');
     const active = [...document.querySelectorAll('#cfg-days-grid .day-btn.active')].map(b => b.dataset.day);
     document.getElementById('cfg_open_days').value = active.join(',');
+}}
+async function saveCollectFields() {{
+    const fields = {{
+        pet_name:    document.getElementById('cf_pet_name').checked,
+        pet_breed:   document.getElementById('cf_pet_breed').checked,
+        pet_weight:  document.getElementById('cf_pet_weight').checked,
+        pickup_time: document.getElementById('cf_pickup_time').checked,
+        address:     document.getElementById('cf_address').checked,
+        notes:       document.getElementById('cf_notes').checked,
+        phone:       document.getElementById('cf_phone').checked,
+    }};
+    const r = await fetch('/api/tenant/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{collect_fields:fields}})}});
+    const d = await r.json();
+    if (d.success) showToast('✅ Campos atualizados!'); else showToast('❌ Erro ao salvar');
+}}
+async function savePayment() {{
+    const pix_key      = document.getElementById('cfg_pix_key').value.trim();
+    const payment_note = document.getElementById('cfg_payment_note').value.trim();
+    const r = await fetch('/api/tenant/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{pix_key,payment_note}})}});
+    const d = await r.json();
+    if (d.success) showToast('✅ Pagamento salvo!'); else showToast('❌ '+(d.error||'Erro'));
 }}
 async function saveConfig() {{
     const display_name       = document.getElementById('cfg_display_name').value.trim();

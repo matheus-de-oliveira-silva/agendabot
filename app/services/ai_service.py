@@ -248,6 +248,47 @@ BUSINESS_CONFIG = {
         "saudacao_extra":  "Voce merece o melhor cuidado ✨",
         "exemplo_confirmacao": "Perfeito, [nome]! ✨\n\n[servico] — [data] as [hora]\n\nSera um prazer recebe-la. Ate la! 🌸",
     },
+    "delivery": {
+        "emoji": "🛵",
+        "personality": (
+            "Voce e o(a) atendente do delivery — rapido(a), objetivo(a) e simpatico(a).\n"
+            "- Confirme rapido — cliente quer praticidade\n"
+            "- Abreviacoes naturais: 'vc', 'ta', 'pra', 'blz'\n"
+            "- 1-3 linhas por mensagem\n"
+            "- Emojis de comida/entrega: 🛵🍔📦✅\n"
+            "- Nunca demore pra confirmar — agilidade e tudo"
+        ),
+        "tom_confirmacao": "Rapido e animado. Ex: 'Pedido confirmado! 🛵 Ta saindo agora!'",
+        "needs_subject":   False,
+        "subject_fields":  "",
+        "needs_pickup":    False,
+        "resumo_subject":  False,
+        "resumo_pickup":   False,
+        "campos_obrigatorios": "customer_name, service, datetime, pickup_address",
+        "saudacao_extra":  "Delivery rapido e gostoso! 🛵",
+        "exemplo_confirmacao": "Pedido anotado! 🛵\n\n[servico] — [data] as [hora]\nEntrega: [endereco]\n\nTa saindo em breve! ✅",
+        "needs_address_suggest": True,
+    },
+    "clinica_humana": {
+        "emoji": "🏥",
+        "personality": (
+            "Voce e a recepcionista da clinica/consultorio — profissional, acolhedora e discreta.\n"
+            "- Linguagem respeitosa e tranquilizadora\n"
+            "- Frases completas, sem girias\n"
+            "- Transmita confianca e organizacao\n"
+            "- 2-3 linhas por mensagem\n"
+            "- Emojis discretos: 🏥✅📋"
+        ),
+        "tom_confirmacao": "Profissional e acolhedora. Ex: 'Consulta confirmada! Estaremos te esperando, [nome] 🏥'",
+        "needs_subject":   False,
+        "subject_fields":  "",
+        "needs_pickup":    False,
+        "resumo_subject":  False,
+        "resumo_pickup":   False,
+        "campos_obrigatorios": "customer_name, service, datetime",
+        "saudacao_extra":  "Sua saude em boas maos 🏥",
+        "exemplo_confirmacao": "Consulta confirmada! ✅\n\n[servico] — [data] as [hora]\n\nEstaremos te esperando, [nome]. Qualquer duvida pode chamar 🏥",
+    },
     "outro": {
         "emoji": "📅",
         "personality": (
@@ -270,7 +311,20 @@ BUSINESS_CONFIG = {
 }
 
 def get_biz(business_type: str) -> dict:
-    return BUSINESS_CONFIG.get(business_type, BUSINESS_CONFIG["outro"])
+    # Aliases para tipos similares
+    _aliases = {
+        "clinica":       "clinica",      # vet
+        "clinica_vet":   "clinica",
+        "veterinaria":   "clinica",
+        "clinica_humana":"clinica_humana",
+        "consultorio":   "clinica_humana",
+        "hamburguer":    "delivery",
+        "restaurante":   "delivery",
+        "lanchonete":    "delivery",
+        "marmita":       "delivery",
+    }
+    biz = _aliases.get(business_type, business_type)
+    return BUSINESS_CONFIG.get(biz, BUSINESS_CONFIG["outro"])
 
 
 # ── Templates ─────────────────────────────────────────────────────────────────
@@ -414,40 +468,78 @@ def chat_with_ai(
     else:
         regra_recorrente = "CLIENTE NOVO: seja acolhedor(a)."
 
-    if biz["needs_subject"]:
+    # ── Campos configuráveis (collect_fields) ────────────────────────────────────
+    _cf = cfg.get("collect_fields") or {}
+    _collect_pet_name    = _cf.get("pet_name",    biz["needs_subject"])
+    _collect_pet_breed   = _cf.get("pet_breed",   biz["needs_subject"])
+    _collect_pet_weight  = _cf.get("pet_weight",  biz.get("resumo_subject", False))
+    _collect_pickup_time = _cf.get("pickup_time", biz["needs_pickup"])
+    _collect_address     = _cf.get("address",     _needs_addr)
+    _collect_notes       = _cf.get("notes",       False)
+    _collect_phone       = _cf.get("phone",       False)
+
+    # Recalcula campos obrigatórios dinamicamente
+    _campos_list = ["customer_name", "service", "datetime"]
+    if _collect_pet_name:    _campos_list.append("pet_name")
+    if _collect_pet_breed:   _campos_list.append("pet_breed")
+    if _collect_pet_weight:  _campos_list.append("pet_weight")
+    if _collect_pickup_time: _campos_list.append("pickup_time")
+    if _collect_address:     _campos_list.append("pickup_address")
+    if _collect_notes:       _campos_list.append("notes")
+    if _collect_phone:       _campos_list.append("phone")
+
+    if _collect_pet_name:
+        _pet_fields = []
+        if _collect_pet_name:   _pet_fields.append("nome")
+        if _collect_pet_breed:  _pet_fields.append("raça")
+        if _collect_pet_weight: _pet_fields.append("peso aproximado")
+        _pet_fields_str = ", ".join(_pet_fields) or "nome"
         regra_subject = (
-            f"COLETA DO {subject.upper()}:\n"
-            f"- Colete: {biz['subject_fields']}\n"
+            f"COLETA DO {subject.upper() or 'PET'}:\n"
+            f"- Colete: {_pet_fields_str}\n"
             f"- Faca apos confirmar servico e horario\n"
             f"- Se ja no contexto: use, NAO pergunte\n"
-            f"- Agrupe: 'Me fala o nome, raca e peso do {subject.lower()} 🐾'"
+            f"- Agrupe tudo numa mensagem: 'Me fala o nome{', raca' if _collect_pet_breed else ''}{' e peso' if _collect_pet_weight else ''} do {subject.lower() or 'pet'} 🐾'"
         )
     else:
         regra_subject = (
-            f"NAO pergunte sobre animal, pet, raca ou peso.\n"
-            f"pet_name, pet_breed, pet_weight = null SEMPRE."
+            "NAO pergunte sobre animal, pet, raca ou peso.\n"
+            "pet_name, pet_breed, pet_weight = null SEMPRE."
         )
 
+    # Regras extras opcionais
+    regra_notes = (
+        "OBSERVACOES: Ao final, pergunte 'Tem alguma observacao especial? 📝' (opcional — cliente pode pular)"
+        if _collect_notes else
+        "NAO pergunte observacoes. notes = null."
+    )
+    regra_phone = (
+        "TELEFONE: Pergunte o telefone de contato do cliente ao inicio."
+        if _collect_phone else
+        "NAO pergunte telefone separado. phone = null."
+    )
+
     regra_pickup = (
-        f"HORARIO DE BUSCA (OBRIGATORIO):\n"
+        f"HORARIO DE BUSCA/ENTREGA (OBRIGATORIO):\n"
         f"- Pergunte apos confirmar servico e horario\n"
-        f"- Ex: 'A que horas busco o {subject.lower()}? 🏠'"
-        if biz["needs_pickup"] else
+        f"- Ex: 'A que horas {'busco' if biz.get('needs_pickup') else 'entrego'}? 🏠'"
+        if _collect_pickup_time else
         "NAO pergunte horario de busca. pickup_time = null."
     )
 
+    # Delivery: endereço é obrigatório por definição do tipo
+    _is_delivery = biz_type in ("delivery", "hamburguer", "restaurante", "lanchonete")
+    _needs_addr  = needs_address or _is_delivery
     regra_address = (
         f"ENDERECO (OBRIGATORIO):\n"
-        f"- Pergunte apos horario{' e busca' if biz['needs_pickup'] else ''}\n"
+        f"- Pergunte apos confirmar servico e horario\n"
         f"- Ex: 'Qual o {address_label.lower()}? 📍 (rua, numero e bairro)'\n"
         f"- NUNCA crie agendamento sem endereco"
-        if needs_address else
+        if _needs_addr else
         "NAO pergunte endereco. pickup_address = null."
     )
 
-    campos = biz["campos_obrigatorios"]
-    if needs_address:
-        campos += ", pickup_address"
+    campos = ", ".join(_campos_list)
 
     if services and len(services) > 1:
         nomes_svc = ", ".join(f'"{s["name"]}"' for s in services[:6])
@@ -511,6 +603,10 @@ Cliente NAO pediu horario:
 Necessarios para criar: {campos}
 NAO crie sem todos preenchidos.
 
+[R8b] CAMPOS EXTRAS
+{regra_notes}
+{regra_phone}
+
 [R9] CONFIRMACAO — REGRA MAIS CRITICA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -539,14 +635,17 @@ Se o historico ja contem uma mensagem de confirmacao do sistema (ex: "✅ Agenda
 NUNCA tente criar um novo agendamento nesse caso.
 RETORNE APENAS: {{"action":"reply","message":"Otimo! Qualquer duvida e so chamar 😊"}}
 
-[R10] ESCOPO
+[R10] PAGAMENTO POS-CONFIRMACAO
+{regra_pagamento}
+
+[R11] ESCOPO
 Somente servicos de {biz_name}.
 Outro assunto: "Aqui so consigo ajudar com agendamentos do {biz_name} 😊"
 
-[R11] MENSAGENS NAO TEXTUAIS
+[R12] MENSAGENS NAO TEXTUAIS
 Audio, imagem, sticker: "oi! aqui so consigo ler texto — pode mandar escrito? 😊"
 
-[R12] ERROS
+[R13] ERROS
 Horario ocupado: "Ops, esse horario ja ta ocupado 😅 Que tal [A] ou [B]?"
 Erro tecnico: "Eita, deu um probleminha 😅 Pode tentar outro horario?"
 NUNCA exponha mensagens de erro tecnico ao cliente.
@@ -558,6 +657,9 @@ Normalize SEMPRE para HH:MM:
 
 ━━━ FUNCIONAMENTO ━━━
 {hours_text}
+
+━━━ PAGAMENTO ━━━
+{payment_text_block}
 
 ━━━ FERIADOS ━━━
 {feriados_text}
@@ -591,6 +693,39 @@ REGRAS JSON:
 - Campos nao aplicaveis: null
 - "amanha" = {data_amanha} | "hoje" = {data_hoje}
 """
+
+
+    # Monta payment_text a partir do tenant_config
+    _pix_key         = cfg.get('pix_key', '') or ''
+    _payment_methods = cfg.get('payment_methods', '') or ''
+    _payment_note    = cfg.get('payment_note', '') or ''
+    _pay_parts = []
+    if _pix_key:
+        _pay_parts.append('PIX: ' + _pix_key)
+    if _payment_methods:
+        _metodos = [m.strip().capitalize() for m in _payment_methods.split(',') if m.strip()]
+        if _metodos:
+            _pay_parts.append('Formas aceitas: ' + ', '.join(_metodos))
+    if _payment_note:
+        _pay_parts.append(_payment_note)
+    payment_text = '\n'.join(_pay_parts) if _pay_parts else ''
+
+    # Monta bloco de pagamento e regra para o prompt
+    if payment_text:
+        payment_text_block = payment_text
+        regra_pagamento = (
+            "Apos confirmar o agendamento, informe as formas de pagamento APENAS UMA VEZ:\n"
+            f"{payment_text}\n"
+            "Seja breve — 1-2 linhas. Nao repita em mensagens seguintes."
+        )
+    else:
+        payment_text_block = "Nao informado."
+        regra_pagamento    = "Nao ha informacao de pagamento configurada — nao mencione pagamento."
+
+    system_prompt = system_prompt.replace("{payment_text_block}", payment_text_block)
+    system_prompt = system_prompt.replace("{regra_pagamento}", regra_pagamento)
+    system_prompt = system_prompt.replace("{regra_notes}", regra_notes)
+    system_prompt = system_prompt.replace("{regra_phone}", regra_phone)
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(conversation_history[-20:])
@@ -628,4 +763,9 @@ REGRAS JSON:
         except json.JSONDecodeError:
             pass
 
-    return {"action": "reply", "message": raw}
+    # Fallback: se a IA retornou texto puro sem JSON válido
+    # trata como reply simples evitando mensagem técnica ao cliente
+    if raw and len(raw) < 500 and not raw.startswith('{'):
+        return {"action": "reply", "message": raw}
+    # Fallback final seguro
+    return {"action": "reply", "message": "Desculpe, não entendi. Pode repetir de outra forma? 😊"}

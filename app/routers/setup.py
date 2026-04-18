@@ -34,14 +34,38 @@ ADDRESS_LABELS = [
     "Endereço do cliente",
 ]
 
+COLLECT_DEFAULTS = {
+    "petshop":        {"pet_name": True,  "pet_breed": True,  "pet_weight": True,  "pickup_time": True,  "address": True,  "notes": False, "phone": False},
+    "clinica":        {"pet_name": True,  "pet_breed": True,  "pet_weight": True,  "pickup_time": False, "address": False, "notes": False, "phone": False},
+    "clinica_humana": {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "adocao":         {"pet_name": True,  "pet_breed": True,  "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "barbearia":      {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": False, "phone": False},
+    "salao":          {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "estetica":       {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": True,  "phone": False},
+    "delivery":       {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": True,  "notes": True,  "phone": False},
+    "outro":          {"pet_name": False, "pet_breed": False, "pet_weight": False, "pickup_time": False, "address": False, "notes": False, "phone": False},
+}
+
+COLLECT_LABELS = {
+    "pet_name":    ("Nome do pet/animal",       "🐾"),
+    "pet_breed":   ("Raça do pet",              "🦴"),
+    "pet_weight":  ("Peso do pet",              "⚖️"),
+    "pickup_time": ("Horário de busca/entrega", "🏠"),
+    "address":     ("Endereço de busca/entrega","📍"),
+    "notes":       ("Observações do cliente",   "📝"),
+    "phone":       ("Telefone de contato",      "📱"),
+}
+
 BUSINESS_TYPES = {
-    "petshop":   {"label": "🐾 Pet Shop",            "subject": "Pet",     "subject_plural": "Pets",     "icon": "🐾", "needs_address_suggest": True},
-    "clinica":   {"label": "🏥 Clínica Veterinária", "subject": "Animal",  "subject_plural": "Animais",  "icon": "🏥", "needs_address_suggest": False},
-    "adocao":    {"label": "🐶 Clínica de Adoção",   "subject": "Animal",  "subject_plural": "Animais",  "icon": "🐶", "needs_address_suggest": False},
-    "barbearia": {"label": "💈 Barbearia",            "subject": "Cliente", "subject_plural": "Clientes", "icon": "💈", "needs_address_suggest": False},
-    "salao":     {"label": "💅 Salão de Beleza",      "subject": "Cliente", "subject_plural": "Clientes", "icon": "💅", "needs_address_suggest": False},
-    "estetica":  {"label": "✨ Estética",             "subject": "Cliente", "subject_plural": "Clientes", "icon": "✨", "needs_address_suggest": False},
-    "outro":     {"label": "⚙️ Outro",               "subject": "Cliente", "subject_plural": "Clientes", "icon": "⚙️", "needs_address_suggest": False},
+    "petshop":        {"label": "🐾 Pet Shop",               "subject": "Pet",     "subject_plural": "Pets",     "icon": "🐾", "needs_address_suggest": True},
+    "clinica":        {"label": "🏥 Clínica Veterinária",    "subject": "Animal",  "subject_plural": "Animais",  "icon": "🏥", "needs_address_suggest": False},
+    "clinica_humana": {"label": "🩺 Clínica / Consultório",  "subject": "",        "subject_plural": "",         "icon": "🩺", "needs_address_suggest": False},
+    "adocao":         {"label": "🐶 ONG / Adoção",           "subject": "Animal",  "subject_plural": "Animais",  "icon": "🐶", "needs_address_suggest": False},
+    "barbearia":      {"label": "💈 Barbearia",               "subject": "",        "subject_plural": "",         "icon": "💈", "needs_address_suggest": False},
+    "salao":          {"label": "💅 Salão de Beleza",         "subject": "",        "subject_plural": "",         "icon": "💅", "needs_address_suggest": False},
+    "estetica":       {"label": "✨ Estética / Spa",          "subject": "",        "subject_plural": "",         "icon": "✨", "needs_address_suggest": False},
+    "delivery":       {"label": "🛵 Delivery / Restaurante",  "subject": "",        "subject_plural": "",         "icon": "🛵", "needs_address_suggest": True},
+    "outro":          {"label": "⚙️ Outro",                  "subject": "",        "subject_plural": "",         "icon": "⚙️", "needs_address_suggest": False},
 }
 
 SERVICOS_PADRAO = {
@@ -51,7 +75,9 @@ SERVICOS_PADRAO = {
     "barbearia": [("Corte",30,4000,"#74b9ff","Corte masculino"),("Barba",20,3000,"#6C5CE7","Barba completa"),("Corte + Barba",50,6500,"#a29bfe","Combo completo"),("Sobrancelha",15,1500,"#00b894","Design de sobrancelha")],
     "salao":     [("Corte Feminino",60,8000,"#fd79a8","Corte e finalização"),("Escova",45,6000,"#f0a500","Escova progressiva"),("Coloração",120,15000,"#6C5CE7","Coloração completa"),("Manicure",40,4000,"#00b894","Unhas mãos")],
     "estetica":  [("Limpeza de Pele",60,9000,"#74b9ff","Limpeza profunda"),("Depilação",45,6000,"#fd79a8","Depilação a cera"),("Massagem",60,12000,"#00b894","Massagem relaxante"),("Design de Sobrancelha",30,5000,"#6C5CE7","Design completo")],
-    "outro":     [("Serviço Padrão",60,10000,"#6C5CE7","Descreva seu serviço")],
+    "clinica_humana": [("Consulta",30,15000,"#00b894","Consulta médica"),("Retorno",20,8000,"#55efc4","Consulta de retorno"),("Exame",15,12000,"#fd79a8","Exame laboratorial"),("Procedimento",60,35000,"#e17055","Procedimento clínico")],
+    "delivery":       [("Hamburguer",30,3000,"#e17055","Hamburguer artesanal"),("Pizza",40,4500,"#f0a500","Pizza média"),("Marmita",20,2000,"#00b894","Marmita do dia"),("Combo",45,5500,"#6C5CE7","Combo especial")],
+    "outro":          [("Serviço Padrão",60,10000,"#6C5CE7","Descreva seu serviço")],
 }
 
 
@@ -129,7 +155,7 @@ input:focus,select:focus{border-color:#7c7de8;box-shadow:0 0 0 3px #23254a}
 
 
 def _steps_html(current: int) -> str:
-    labels = ["Negócio", "Dados", "Horários", "Serviços", "WhatsApp", "Finalizar"]
+    labels = ["Negócio", "Dados", "Horários", "Campos", "Serviços", "WhatsApp", "Finalizar"]
     items = ""
     for i, label in enumerate(labels, 1):
         if i < current:
@@ -360,9 +386,12 @@ def setup_step2(request: Request, token: str = "", db: Session = Depends(get_db)
     na_checked     = 'checked' if needs_address else ''
     addr_display   = 'block' if needs_address else 'none'
     addr_opts      = ''.join(f'<option value="{l}" {"selected" if l == current_label else ""}>{l}</option>' for l in ADDRESS_LABELS)
-    biz_type       = tenant.business_type or "outro"
-    addr_suggest   = BUSINESS_TYPES.get(biz_type, {}).get("needs_address_suggest", False)
-    suggest_html   = ""
+    biz_type            = tenant.business_type or "outro"
+    addr_suggest        = BUSINESS_TYPES.get(biz_type, {}).get("needs_address_suggest", False)
+    suggest_html        = ""
+    pix_key             = getattr(tenant, 'pix_key', '') or ''
+    payment_note        = getattr(tenant, 'payment_note', '') or ''
+    current_pay_methods = getattr(tenant, 'payment_methods', 'pix,dinheiro,cartao') or 'pix,dinheiro,cartao' 
     if addr_suggest and not needs_address:
         suggest_html = '<div class="alert alert-info" style="margin-bottom:12px">💡 Pet shops geralmente fazem busca e entrega. Ative abaixo se for o seu caso!</div>'
 
@@ -402,6 +431,31 @@ def setup_step2(request: Request, token: str = "", db: Session = Depends(get_db)
         <select name="address_label">{addr_opts}</select>
       </div>
     </div>
+    <div class="divider"></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:12px">💳 Pagamento</div>
+    <div class="form-group">
+      <label>Chave PIX (para o bot informar ao cliente)</label>
+      <input type="text" name="pix_key" value="{pix_key}" placeholder="Ex: 11999999999 ou email@negocio.com">
+      <div style="font-size:11px;color:#9aa0b8;margin-top:4px">Deixe em branco se não aceita PIX ou prefere combinar pessoalmente</div>
+    </div>
+    <div class="form-group">
+      <label>Formas de pagamento aceitas</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#e8eaf2;cursor:pointer">
+          <input type="checkbox" name="pay_pix" value="1" id="pay_pix" {"checked" if "pix" in (current_pay_methods or "pix") else ""}> PIX
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#e8eaf2;cursor:pointer">
+          <input type="checkbox" name="pay_dinheiro" value="1" {"checked" if "dinheiro" in (current_pay_methods or "dinheiro") else ""}> Dinheiro
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#e8eaf2;cursor:pointer">
+          <input type="checkbox" name="pay_cartao" value="1" {"checked" if "cartao" in (current_pay_methods or "cartao") else ""}> Cartão
+        </label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Observação de pagamento (opcional)</label>
+      <input type="text" name="payment_note" value="{payment_note}" placeholder="Ex: Pagamento na entrega ou antecipado via PIX">
+    </div>
     <div style="display:flex;gap:10px;margin-top:8px">
       <a href="/setup/step1?token={token}" class="btn btn-outline" style="flex:1">← Voltar</a>
       <button type="submit" class="btn btn-primary" style="flex:2">Próximo →</button>
@@ -435,6 +489,116 @@ async def setup_step2_post(request: Request, token: str = "", db: Session = Depe
     tenant.close_time    = form.get("close_time", "18:00")
     tenant.needs_address = form.get("needs_address") == "1"
     tenant.address_label = form.get("address_label", "Endereço de busca")
+    # PIX e pagamento
+    tenant.pix_key       = (form.get("pix_key") or "").strip() or None
+    tenant.payment_note  = (form.get("payment_note") or "").strip() or None
+    pay_methods = []
+    if form.get("pay_pix"):      pay_methods.append("pix")
+    if form.get("pay_dinheiro"): pay_methods.append("dinheiro")
+    if form.get("pay_cartao"):   pay_methods.append("cartao")
+    tenant.payment_methods = ",".join(pay_methods) if pay_methods else "pix,dinheiro,cartao"
+    db.commit()
+    return RedirectResponse(f"/setup/campos?token={token}", status_code=302)
+
+
+# ── PASSO 2b — Campos de coleta ──────────────────────────────────────────────
+
+@router.get("/setup/campos", response_class=HTMLResponse)
+def setup_campos(request: Request, token: str = "", db: Session = Depends(get_db)):
+    tenant = _get_tenant_by_token(token, db)
+    if not tenant:
+        return _error_page("Link inválido.")
+    import json as _j
+    biz_type = tenant.business_type or "outro"
+    defaults = COLLECT_DEFAULTS.get(biz_type, COLLECT_DEFAULTS["outro"]).copy()
+    try:
+        saved = _j.loads(tenant.collect_fields or "{}") if tenant.collect_fields else {}
+        defaults.update(saved)
+    except Exception:
+        pass
+
+    def _cb(key):
+        return "checked" if defaults.get(key, False) else ""
+
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0">
+<title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
+<div class="header"><div class="logo">⚡ BotGen Setup</div></div>
+<div class="container">
+{_steps_html(4)}
+<div class="card">
+  <div class="card-title">📋 O que o bot deve coletar?</div>
+  <div class="card-sub">Configure quais informações a IA vai perguntar ao cliente. Os 3 primeiros são sempre coletados automaticamente.</div>
+  <div style="background:#0f1117;border:1px solid #2d3148;border-radius:10px;padding:14px 16px;margin-bottom:20px">
+    <div style="font-size:11px;font-weight:700;color:#9aa0b8;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Sempre coletados</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:13px;color:#5a6172"><span style="color:#2e7d32;font-weight:800">✓</span> 👤 Nome do cliente</div>
+      <div style="font-size:13px;color:#5a6172"><span style="color:#2e7d32;font-weight:800">✓</span> ✂️ Serviço</div>
+      <div style="font-size:13px;color:#5a6172"><span style="color:#2e7d32;font-weight:800">✓</span> 📅 Data e horário</div>
+    </div>
+  </div>
+  <div style="font-size:11px;font-weight:700;color:#9aa0b8;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Opcionais — ative o que quiser</div>
+  <form method="POST" action="/setup/campos?token={{token}}">
+    <input type="hidden" name="token" value="{{token}}">
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+      <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
+        <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">🐾 Nome do pet/animal</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Ex: Rex, Mel, Thor</div></div>
+        <input type="checkbox" name="pet_name" value="1" {_cb('pet_name')}>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
+        <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">🦴 Raça do pet</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Ex: Labrador, Poodle</div></div>
+        <input type="checkbox" name="pet_breed" value="1" {_cb('pet_breed')}>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
+        <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">⚖️ Peso do pet</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Útil para calcular doses</div></div>
+        <input type="checkbox" name="pet_weight" value="1" {_cb('pet_weight')}>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
+        <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">🏠 Horário de busca/entrega</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Para negócios que buscam ou entregam</div></div>
+        <input type="checkbox" name="pickup_time" value="1" {_cb('pickup_time')}>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
+        <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">📍 Endereço de busca/entrega</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Para delivery ou busca em domicílio</div></div>
+        <input type="checkbox" name="address" value="1" {_cb('address')}>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
+        <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">📝 Observações do cliente</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Ex: alergias, preferências especiais</div></div>
+        <input type="checkbox" name="notes" value="1" {_cb('notes')}>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px 14px;cursor:pointer">
+        <div><div style="font-size:13px;font-weight:600;color:#e8eaf2">📱 Telefone de contato</div><div style="font-size:11px;color:#9aa0b8;margin-top:2px">Além do WhatsApp, pede número extra</div></div>
+        <input type="checkbox" name="phone" value="1" {_cb('phone')}>
+      </label>
+    </div>
+    <div style="display:flex;gap:10px">
+      <a href="/setup/step2?token={{token}}" class="btn btn-outline" style="flex:1">← Voltar</a>
+      <button type="submit" class="btn btn-primary" style="flex:2">Próximo →</button>
+    </div>
+  </form>
+</div>
+</div>
+</body></html>""")
+
+
+@router.post("/setup/campos")
+async def setup_campos_post(request: Request, token: str = "", db: Session = Depends(get_db)):
+    import json as _j
+    form   = await request.form()
+    token  = token or form.get("token", "")
+    tenant = _get_tenant_by_token(token, db)
+    if not tenant:
+        return _error_page("Link inválido.")
+    fields = {
+        "pet_name":    form.get("pet_name")    == "1",
+        "pet_breed":   form.get("pet_breed")   == "1",
+        "pet_weight":  form.get("pet_weight")  == "1",
+        "pickup_time": form.get("pickup_time") == "1",
+        "address":     form.get("address")     == "1",
+        "notes":       form.get("notes")       == "1",
+        "phone":       form.get("phone")       == "1",
+    }
+    tenant.collect_fields = _j.dumps(fields)
+    tenant.needs_address  = fields["address"]
     db.commit()
     return RedirectResponse(f"/setup/step3?token={token}", status_code=302)
 

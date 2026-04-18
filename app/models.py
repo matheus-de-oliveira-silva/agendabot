@@ -69,6 +69,17 @@ class Tenant(Base):
     plan_tenant_group = Column(String, nullable=True)      # agência: email do comprador principal
     next_billing_date = Column(Date, nullable=True)        # para aviso de vencimento (migration v7)
 
+    # Pagamento — chave PIX e formas aceitas
+    # O bot informa automaticamente após confirmar agendamento
+    pix_key           = Column(String, nullable=True)   # Ex: "11999999999" ou "email@empresa.com"
+    # ── Campos configuráveis que a IA coleta ────────────────────────────────────
+    # JSON: {"pet_name":true,"pet_breed":true,"pet_weight":false,...}
+    # Se null → usa defaults do business_type
+    collect_fields    = Column(Text, nullable=True)
+    pix_type          = Column(String, default="telefone")  # "telefone"|"email"|"cpf"|"cnpj"|"aleatoria"
+    payment_methods   = Column(String, nullable=True)   # Ex: "pix,dinheiro,cartao" (separado por vírgula)
+    payment_note      = Column(String, nullable=True)   # Ex: "Pagamento na entrega ou via PIX"
+
     # Evolution API por tenant (escalabilidade multi-servidor)
     # Se vazio, usa variáveis globais EVOLUTION_API_URL e EVOLUTION_API_KEY
     # LGPD: cada tenant usa instância própria — isolamento total de mensagens

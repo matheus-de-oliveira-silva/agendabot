@@ -122,6 +122,12 @@ def get_tenant_config(tenant) -> dict:
         "close_time":           getattr(tenant, 'close_time', None) or "18:00",
         "needs_address":        bool(getattr(tenant, 'needs_address', False)),
         "address_label":        getattr(tenant, 'address_label', None) or "Endereço de busca",
+        # Pagamento
+        "pix_key":              getattr(tenant, 'pix_key', None) or "",
+        "collect_fields":       get_collect_fields(tenant),
+        "pix_type":             getattr(tenant, 'pix_type', None) or "telefone",
+        "payment_methods":      getattr(tenant, 'payment_methods', None) or "",
+        "payment_note":         getattr(tenant, 'payment_note', None) or "",
     }
 
 
@@ -396,7 +402,8 @@ async def whatsapp_webhook(request: Request):
                         # FIX: notify em try/catch — falha não impede resposta ao cliente
                         try:
                             appt_obj = db.query(Appointment).filter(
-                                Appointment.id == result["appointment_id"]
+                                Appointment.id        == result["appointment_id"],
+                                Appointment.tenant_id == tenant.id
                             ).first()
                             if appt_obj:
                                 await notify_owner_new_appointment(tenant, appt_obj, customer, service_obj)
