@@ -649,7 +649,7 @@ def setup_step3(request: Request, token: str = "", db: Session = Depends(get_db)
 <title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
-{_steps_html(4)}
+{_steps_html(5)}
 <div class="card">
   <div class="card-title">✂️ Serviços oferecidos</div>
   <div class="card-sub">Cadastre os serviços que seu negócio oferece. O bot usa essas informações para apresentar opções aos clientes.</div>
@@ -742,11 +742,14 @@ async def setup_step4(request: Request, token: str = "", db: Session = Depends(g
     # Cria a instância automaticamente SE ainda não existir
     # Idempotente — se já existe retorna success=True sem duplicar
     if not tenant.phone_number_id and EVOLUTION_API_URL and EVOLUTION_API_KEY:
-        from ..services.evolution_helper import create_instance
+        from ..services.evolution_helper import create_instance, configure_instance_webhook
         result = await create_instance(instance_name)
         if result.get("success"):
             tenant.phone_number_id = instance_name
             db.commit()
+            # Configura webhook com a URL real do servidor (do request)
+            base_url = _get_base_url(request)
+            await configure_instance_webhook(instance_name, webhook_url=f"{base_url}/whatsapp/webhook")
 
     has_instance = bool(tenant.phone_number_id)
     instance_name = tenant.phone_number_id or instance_name
@@ -764,7 +767,7 @@ async def setup_step4(request: Request, token: str = "", db: Session = Depends(g
 </head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
-{_steps_html(5)}
+{_steps_html(6)}
 <div class="card">
   <div class="card-title">📱 Conectar WhatsApp</div>
   <div class="card-sub">Escaneie o QR Code abaixo com o <strong>WhatsApp Business</strong> do seu negócio para conectar o bot.</div>
@@ -1015,7 +1018,7 @@ def setup_step5(request: Request, token: str = "", db: Session = Depends(get_db)
 <title>Setup — BotGen</title>{SETUP_STYLE}</head><body>
 <div class="header"><div class="logo">⚡ BotGen Setup</div></div>
 <div class="container">
-{_steps_html(6)}
+{_steps_html(7)}
 <div class="card">
   <div class="card-title">📋 Resumo da configuração</div>
   <div class="card-sub">Verifique se tudo está correto antes de finalizar.</div>

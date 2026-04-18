@@ -84,20 +84,22 @@ async def send_whatsapp_message(phone: str, text: str, tenant) -> bool:
 
 
 
-async def configure_instance_webhook(instance_name: str) -> bool:
+async def configure_instance_webhook(instance_name: str, webhook_url: str = "") -> bool:
     """
     Configura o webhook da instância para receber mensagens do WhatsApp.
-    Chamado automaticamente após criar a instância.
+    webhook_url: URL completa do webhook (ex: https://app.railway.app/whatsapp/webhook)
+    Se não fornecida, tenta usar APP_URL do env.
     """
     if not EVOLUTION_API_URL_GLOBAL or not EVOLUTION_API_KEY_GLOBAL:
         return False
 
-    app_url = APP_URL_GLOBAL.rstrip("/") if APP_URL_GLOBAL else ""
-    if not app_url:
-        print(f"[Evolution] ⚠️ APP_URL não configurada — webhook não configurado")
-        return False
-
-    webhook_url = f"{app_url}/whatsapp/webhook"
+    # Prioridade: parâmetro > APP_URL do env
+    if not webhook_url:
+        app_url = APP_URL_GLOBAL.rstrip("/") if APP_URL_GLOBAL else ""
+        if not app_url:
+            print(f"[Evolution] ⚠️ webhook_url não fornecida e APP_URL não configurada")
+            return False
+        webhook_url = f"{app_url}/whatsapp/webhook"
     url     = f"{EVOLUTION_API_URL_GLOBAL.rstrip('/')}/webhook/set/{instance_name}"
     headers = {"apikey": EVOLUTION_API_KEY_GLOBAL, "Content-Type": "application/json"}
 
