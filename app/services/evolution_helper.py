@@ -101,14 +101,12 @@ async def configure_instance_webhook(instance_name: str) -> bool:
     url     = f"{EVOLUTION_API_URL_GLOBAL.rstrip('/')}/webhook/set/{instance_name}"
     headers = {"apikey": EVOLUTION_API_KEY_GLOBAL, "Content-Type": "application/json"}
 
+    # Formato correto Evolution API v2 (flat, não aninhado)
     payload = {
-        "url":     webhook_url,
+        "url":              webhook_url,
         "webhook_by_events": False,
         "webhook_base64":    False,
-        "events": [
-            "MESSAGES_UPSERT",
-            "CONNECTION_UPDATE",
-        ]
+        "events":            ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
     }
 
     async with httpx.AsyncClient(timeout=15) as client:

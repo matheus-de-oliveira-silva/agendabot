@@ -805,8 +805,10 @@ async def setup_step4(request: Request, token: str = "", db: Session = Depends(g
 const TOKEN   = "{token}";
 const INSTANCE = "{instance_name}";
 const HAS_EVO  = {"true" if EVOLUTION_API_URL else "false"};
-let pollTimer  = null;
-let connected  = false;
+let pollTimer   = null;
+let connected   = false;
+let pollAttempts = 0;
+const MAX_POLL   = 60; // máx 4 minutos de polling
 
 async function loadQR() {{
   if (!HAS_EVO) return;
@@ -828,6 +830,17 @@ async function loadQR() {{
 
 async function pollConnection() {{
   if (!HAS_EVO || connected) return;
+  pollAttempts++;
+  // Para de fazer polling após o limite
+  if (pollAttempts > MAX_POLL) {{
+    const el = document.getElementById('conn-status');
+    if (el) {{
+      el.style.display = 'block';
+      el.className = 'conn-status conn-fail';
+      el.textContent = '⏱️ Tempo expirado. Clique em "Já conectei" se já escaneou o QR Code.';
+    }}
+    return;
+  }}
   try {{
     const r = await fetch(`/setup/test-whatsapp?token=${{TOKEN}}&instance=${{encodeURIComponent(INSTANCE)}}`);
     const d = await r.json();
@@ -835,16 +848,23 @@ async function pollConnection() {{
       connected = true;
       clearTimeout(pollTimer);
       const el = document.getElementById('conn-status');
-      el.style.display = 'block';
-      el.className = 'conn-status conn-ok';
-      el.textContent = '✅ WhatsApp conectado! Pode continuar.';
-      document.getElementById('btn-continue').textContent = 'Continuar →';
-      document.getElementById('btn-continue').style.background = 'var(--success, #2e7d32)';
+      if (el) {{
+        el.style.display = 'block';
+        el.className = 'conn-status conn-ok';
+        el.textContent = '✅ WhatsApp conectado! Pode continuar.';
+      }}
+      const btn = document.getElementById('btn-continue');
+      if (btn) {{
+        btn.textContent = 'Continuar →';
+        btn.style.background = '#2e7d32';
+      }}
     }} else {{
-      pollTimer = setTimeout(pollConnection, 4000);
+      // Intervalo aumenta após 10 tentativas (economiza recursos)
+      const interval = pollAttempts > 10 ? 8000 : 4000;
+      pollTimer = setTimeout(pollConnection, interval);
     }}
   }} catch(e) {{
-    pollTimer = setTimeout(pollConnection, 5000);
+    pollTimer = setTimeout(pollConnection, 6000);
   }}
 }}
 
