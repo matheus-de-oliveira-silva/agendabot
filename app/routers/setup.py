@@ -747,9 +747,15 @@ async def setup_step4(request: Request, token: str = "", db: Session = Depends(g
         if result.get("success"):
             tenant.phone_number_id = instance_name
             db.commit()
-            # Configura webhook com a URL real do servidor (do request)
+            # Aguarda 2s para instância inicializar, depois configura webhook
+            import asyncio as _asyncio
+            await _asyncio.sleep(2)
             base_url = _get_base_url(request)
-            await configure_instance_webhook(instance_name, webhook_url=f"{base_url}/whatsapp/webhook")
+            wh_ok = await configure_instance_webhook(instance_name, webhook_url=f"{base_url}/whatsapp/webhook")
+            if wh_ok:
+                print(f"[Setup] ✅ Webhook configurado para {instance_name}")
+            else:
+                print(f"[Setup] ⚠️ Webhook falhou para {instance_name} — cliente precisará de suporte")
 
     has_instance = bool(tenant.phone_number_id)
     instance_name = tenant.phone_number_id or instance_name
