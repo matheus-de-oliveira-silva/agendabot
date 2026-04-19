@@ -739,23 +739,27 @@ async def setup_step4(request: Request, token: str = "", db: Session = Depends(g
     # Só cria se ainda não tem instância configurada
     instance_name = tenant.phone_number_id or f"botgen-{tenant.id[:8]}"
 
-    # Cria a instância automaticamente SE ainda não existir
-    # Idempotente — se já existe retorna success=True sem duplicar
-    if not tenant.phone_number_id and EVOLUTION_API_URL and EVOLUTION_API_KEY:
+    # Cria instância e configura webhook — SEMPRE executa quando Evolution está disponível
+    if EVOLUTION_API_URL and EVOLUTION_API_KEY:
         from ..services.evolution_helper import create_instance, configure_instance_webhook
+        import asyncio as _asyncio
+
+        # Cria instância (idempotente — não duplica se já existe)
         result = await create_instance(instance_name)
         if result.get("success"):
-            tenant.phone_number_id = instance_name
-            db.commit()
-            # Aguarda 2s para instância inicializar, depois configura webhook
-            import asyncio as _asyncio
+            if not tenant.phone_number_id:
+                tenant.phone_number_id = instance_name
+                db.commit()
+            # Configura webhook SEMPRE — mesmo se instância já existia
+            # Garante que URL e eventos estão corretos independente do histórico
             await _asyncio.sleep(2)
             base_url = _get_base_url(request)
-            wh_ok = await configure_instance_webhook(instance_name, webhook_url=f"{base_url}/whatsapp/webhook")
+            wh_url   = f"{base_url}/whatsapp/webhook"
+            wh_ok    = await configure_instance_webhook(instance_name, webhook_url=wh_url)
             if wh_ok:
-                print(f"[Setup] ✅ Webhook configurado para {instance_name}")
+                print(f"[Setup] ✅ Webhook OK: {instance_name} → {wh_url}")
             else:
-                print(f"[Setup] ⚠️ Webhook falhou para {instance_name} — cliente precisará de suporte")
+                print(f"[Setup] ❌ Webhook FALHOU: {instance_name} — veja os logs acima")
 
     has_instance = bool(tenant.phone_number_id)
     instance_name = tenant.phone_number_id or instance_name

@@ -86,43 +86,80 @@ async def send_whatsapp_message(phone: str, text: str, tenant) -> bool:
 
 async def configure_instance_webhook(instance_name: str, webhook_url: str = "") -> bool:
     """
-    Configura o webhook da instância para receber mensagens do WhatsApp.
-    webhook_url: URL completa do webhook (ex: https://app.railway.app/whatsapp/webhook)
-    Se não fornecida, tenta usar APP_URL do env.
+    Configura o webhook da instância — tenta todos os formatos conhecidos da Evolution API.
     """
     if not EVOLUTION_API_URL_GLOBAL or not EVOLUTION_API_KEY_GLOBAL:
         return False
 
-    # Prioridade: parâmetro > APP_URL do env
     if not webhook_url:
         app_url = APP_URL_GLOBAL.rstrip("/") if APP_URL_GLOBAL else ""
         if not app_url:
             print(f"[Evolution] ⚠️ webhook_url não fornecida e APP_URL não configurada")
             return False
         webhook_url = f"{app_url}/whatsapp/webhook"
-    url     = f"{EVOLUTION_API_URL_GLOBAL.rstrip('/')}/webhook/set/{instance_name}"
-    headers = {"apikey": EVOLUTION_API_KEY_GLOBAL, "Content-Type": "application/json"}
 
-    # Formato correto Evolution API v2 (flat, não aninhado)
-    payload = {
-        "url":              webhook_url,
-        "webhook_by_events": False,
-        "webhook_base64":    False,
-        "events":            ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
-    }
+    headers = {"apikey": EVOLUTION_API_KEY_GLOBAL, "Content-Type": "application/json"}
+    base    = EVOLUTION_API_URL_GLOBAL.rstrip("/")
+
+    # Combinações de endpoint + payload para máxima compatibilidade
+    attempts = [
+        # v2.3.x — endpoint set com instanceName no body
+        (f"{base}/webhook/set/{instance_name}", {
+            "instanceName":    instance_name,
+            "enabled":         True,
+            "url":             webhook_url,
+            "webhookByEvents": False,
+            "webhookBase64":   False,
+            "events":          ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+        }),
+        # v2.3.x — snake_case com instanceName
+        (f"{base}/webhook/set/{instance_name}", {
+            "instanceName":     instance_name,
+            "enabled":          True,
+            "url":              webhook_url,
+            "webhook_by_events": False,
+            "webhook_base64":    False,
+            "events":            ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+        }),
+        # v2 — sem instanceName no body
+        (f"{base}/webhook/set/{instance_name}", {
+            "enabled":          True,
+            "url":              webhook_url,
+            "webhookByEvents":  False,
+            "webhookBase64":    False,
+            "events":           ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+        }),
+        # v1 — flat sem enabled
+        (f"{base}/webhook/set/{instance_name}", {
+            "url":              webhook_url,
+            "webhook_by_events": False,
+            "webhook_base64":    False,
+            "events":            ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+        }),
+        # v2 alternativo — endpoint diferente
+        (f"{base}/instance/setWebhook/{instance_name}", {
+            "instanceName":    instance_name,
+            "enabled":         True,
+            "url":             webhook_url,
+            "events":          ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+        }),
+    ]
 
     async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            resp = await client.post(url, json=payload, headers=headers)
-            if resp.status_code in (200, 201):
-                print(f"[Evolution] ✅ Webhook configurado: {instance_name} → {webhook_url}")
-                return True
-            else:
-                print(f"[Evolution] ⚠️ Erro ao configurar webhook {resp.status_code}: {resp.text[:80]}")
-                return False
-        except Exception as e:
-            print(f"[Evolution] ⚠️ Exceção webhook: {e}")
-            return False
+        for i, (url, payload) in enumerate(attempts, 1):
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code in (200, 201):
+                    print(f"[Evolution] ✅ Webhook OK (formato {i}): {instance_name} → {webhook_url}")
+                    return True
+                else:
+                    print(f"[Evolution] formato {i} ERRO {resp.status_code}: {resp.text[:500]}")
+            except Exception as e:
+                print(f"[Evolution] formato {i} exceção: {e}")
+
+    print(f"[Evolution] ❌ Todos os formatos falharam para {instance_name}")
+    return False
+
 
 
 async def create_instance(instance_name: str) -> dict:
@@ -150,6 +187,9 @@ async def create_instance(instance_name: str) -> dict:
                     print(f"[Evolution] Instância já existe: {instance_name}")
                 else:
                     print(f"[Evolution] ✅ Instância criada: {instance_name}")
+                    # Aguarda instância inicializar antes de configurar webhook
+                    import asyncio
+                    await asyncio.sleep(2)
                 # Configura webhook automaticamente (nova ou existente)
                 await configure_instance_webhook(instance_name)
                 return {"success": True, "instance": instance_name, "already_exists": already_exists}
